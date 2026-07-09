@@ -9,13 +9,7 @@ const DEFAULT_GEARS = [5.14, 2.83, 1.79, 1.26, 1.0, 0.83];
 const MAX_GEARS = 8;
 const MIN_GEARS = 1;
 
-const GEAR_COLORS = [
-  "#2f6fed", "#e0803a", "#3aa76d", "#d64545",
-  "#8c5bd8", "#0f9bb0", "#c74f9a", "#7a8b3f",
-];
-
 const $ = (sel) => document.querySelector(sel);
-const gearColor = (i) => GEAR_COLORS[i % GEAR_COLORS.length];
 
 let pyodide = null;
 let pyCompute = null;
@@ -29,6 +23,14 @@ let lastResult = null;
 function polar(cx, cy, r, angleDeg) {
   const a = ((angleDeg - 90) * Math.PI) / 180;
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+
+/** SVG arc path from `startAngle` to `endAngle` (clockwise). */
+function arcPath(cx, cy, r, startAngle, endAngle) {
+  const [x1, y1] = polar(cx, cy, r, startAngle);
+  const [x2, y2] = polar(cx, cy, r, endAngle);
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
 }
 
 const svgEl = (name, attrs = {}, text = null) => {
@@ -62,15 +64,31 @@ function gaugeScale(rawMax, maxTicks = 7) {
   return { max: rawMax, step: rawMax / 5 };
 }
 
+/**
+ * A tachometer counts in 1000-rpm majors and its dial *ends* at the redline, so
+ * the red band is exactly the last major segment. Using `gaugeScale` here would
+ * round the dial past the redline (9000 rpm → a 10000 dial) and pick a step the
+ * band can't line up with. Redlines too low to divide into thousands fall back
+ * to the generic scale, where the band is that scale's last step instead.
+ */
+function rpmScale(maxRpm) {
+  const step = maxRpm >= 3000 ? 1000 : gaugeScale(maxRpm).step;
+  return { max: Math.ceil(maxRpm / step) * step, step };
+}
+
 // One minor tick at each half-step, as on the reference cluster. Retune here.
 const MINOR_PER_MAJOR = 2;
+
+// Pulls the redline arc's ends off the two major ticks bounding it, so the red
+// sits between them rather than running underneath.
+const REDLINE_INSET_DEG = 2.5;
 
 const R_BEZEL = 97;
 const R_FACE = 95;
 const R_TICK = 88; // outer edge of the tick ring; ticks grow inward from here
 const R_MAJOR_IN = 76;
 const R_MINOR_IN = 81;
-const R_RED_IN = 80;
+const R_RED = 84; // centreline of the redline arc, spanning the tick ring's width
 const R_LABEL = 62;
 const R_NEEDLE = 70;
 const R_HUB = 13;
@@ -85,10 +103,11 @@ function spoke(cls, cx, cy, r1, r2, angle) {
 
 /**
  * Draw a round instrument dial: dark face, tick ring, numerals, tapered needle,
- * printed `legend` lines above the hub and the live value below it.
+ * and `legend` printed below the hub. Like the real cluster it carries no digital
+ * readout; the live rpm is shown between the dials instead.
  * `redlineAt` (a value, optional) marks the band from there to `max` in red.
  */
-function renderGauge(svg, { value, max, step, legend, decimals = 0, redlineAt = null }) {
+function renderGauge(svg, { value, max, step, legend, redlineAt = null }) {
   const cx = 100;
   const cy = 100;
   const clamped = Math.max(0, Math.min(value, max));
@@ -138,18 +157,18 @@ function renderGauge(svg, { value, max, step, legend, decimals = 0, redlineAt = 
     }
   }
 
-  // Bars are spread evenly across the band so one lands exactly on `max`, rather
-  // than marching in from `redlineAt` and stopping short of the last tick.
+  // One unbroken arc, inset at both ends so it sits between the major ticks
+  // bounding the band rather than on top of them.
   if (redlineAt !== null && redlineAt < max) {
-    const bars = Math.max(2, Math.round((max - redlineAt) / (step / 5)));
-    for (let i = 0; i <= bars; i++) {
-      const v = redlineAt + (i / bars) * (max - redlineAt);
-      svg.append(spoke("gauge-redline-bar", cx, cy, R_RED_IN, R_TICK, angleFor(v)));
+    const from = angleFor(redlineAt) + REDLINE_INSET_DEG;
+    const to = angleFor(max) - REDLINE_INSET_DEG;
+    if (to > from) {
+      svg.append(svgEl("path", { class: "gauge-redline", d: arcPath(cx, cy, R_RED, from, to) }));
     }
   }
 
   legend.forEach((line, i) => {
-    svg.append(svgEl("text", { class: "gauge-legend", x: cx, y: cy - 34 + i * 11 }, line));
+    svg.append(svgEl("text", { class: "gauge-legend", x: cx, y: cy + 30 + i * 11 }, line));
   });
 
   // Tapered needle: narrow at the tip, wide across the tail. `u` runs along the
@@ -172,8 +191,6 @@ function renderGauge(svg, { value, max, step, legend, decimals = 0, redlineAt = 
 
   // Drawn after the needle so its base disappears beneath the hub cap.
   svg.append(svgEl("circle", { class: "gauge-hub", cx, cy, r: R_HUB }));
-
-  svg.append(svgEl("text", { class: "gauge-value", x: cx, y: cy + 40 }, clamped.toFixed(decimals)));
 }
 
 /* --------------------------------- chart --------------------------------- */
@@ -191,7 +208,9 @@ function niceStep(x) {
 function renderChart(svg, result, current) {
   const W = 640;
   const H = 360;
-  const M = { top: 16, right: 16, bottom: 44, left: 52 };
+  // Every gear curve tops out at max RPM, so the top margin has to clear the
+  // gear numbers printed above where each one ends.
+  const M = { top: 24, right: 16, bottom: 44, left: 52 };
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom;
 
@@ -242,10 +261,16 @@ function renderChart(svg, result, current) {
     }, "Engine RPM")
   );
 
-  // One polyline per gear.
-  result.curves.forEach((curve, i) => {
+  // One polyline per gear. They share a color, so each is named where it ends —
+  // at max RPM, spread along the top edge by the gear's top speed.
+  result.curves.forEach((curve) => {
     const pts = curve.samples.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
-    svg.append(svgEl("polyline", { class: "chart-line", points: pts, stroke: gearColor(i) }));
+    svg.append(svgEl("polyline", { class: "chart-line", points: pts }));
+    svg.append(
+      svgEl("text", {
+        class: "chart-gear-label", x: xPix(curve.top_speed), y: M.top - 6, "text-anchor": "middle",
+      }, String(curve.gear))
+    );
   });
 
   // The acceleration run: up each gear to the shift RPM, then straight down to
@@ -263,24 +288,14 @@ function renderChart(svg, result, current) {
   // Marker for the current speed, in whichever gear the shift schedule puts it.
   if (current && current.speed >= 0 && current.speed <= xMax) {
     svg.append(
-      svgEl("circle", {
-        class: "chart-marker", cx: xPix(current.speed), cy: yPix(current.rpm), r: 4,
-        fill: gearColor(current.gearIndex),
-      })
+      svgEl("circle", { class: "chart-marker", cx: xPix(current.speed), cy: yPix(current.rpm), r: 4 })
     );
   }
 }
 
+/** The gear curves are named on the plot itself, so only the trace needs a key. */
 function renderLegend(el, result) {
   el.replaceChildren();
-  result.curves.forEach((curve, i) => {
-    const span = document.createElement("span");
-    const sw = document.createElement("i");
-    sw.className = "swatch";
-    sw.style.background = gearColor(i);
-    span.append(sw, document.createTextNode(`Gear ${curve.gear} (${curve.ratio.toFixed(2)})`));
-    el.append(span);
-  });
 
   if (result.shifts.length) {
     const span = document.createElement("span");
@@ -379,10 +394,7 @@ function buildGearRows(ratios) {
     row.className = "gear-row";
 
     const label = document.createElement("span");
-    const sw = document.createElement("i");
-    sw.className = "swatch";
-    sw.style.background = gearColor(i);
-    label.append(sw, document.createTextNode(String(i + 1)));
+    label.textContent = String(i + 1);
 
     const input = document.createElement("input");
     input.type = "number";
@@ -463,15 +475,14 @@ function redraw() {
   }
 
   const gearNum = at.gear;
-  const gearIndex = gearNum - 1;
   const rpm = at.rpm;
   $("#cur_gear").textContent = String(gearNum);
 
-  const tachScale = gaugeScale(inputs.max_rpm);
+  const tach = rpmScale(inputs.max_rpm);
   renderGauge($("#tach"), {
-    value: rpm, ...tachScale,
-    legend: tachScale.max >= 1000 ? ["1/min", "×1000"] : ["1/min"],
-    redlineAt: inputs.max_rpm * 0.85,
+    value: rpm, ...tach,
+    legend: tach.max >= 1000 ? ["1/min", "×1000"] : ["1/min"],
+    redlineAt: tach.max - tach.step, // the last major segment, i.e. the top 1000 rpm
   });
 
   const speedScale = gaugeScale(Math.max(lastResult.max_speed, 1));
@@ -479,7 +490,9 @@ function redraw() {
     value: speed, ...speedScale, legend: [lastResult.speed_unit],
   });
 
-  renderChart($("#chart"), lastResult, { rpm, speed, gearIndex });
+  $("#rpm_out").textContent = String(Math.round(rpm));
+
+  renderChart($("#chart"), lastResult, { rpm, speed });
   renderLegend($("#legend"), lastResult);
   renderTable($("#table tbody"), lastResult, inputs, gearNum);
   renderShiftTable($("#shift-table tbody"), lastResult);

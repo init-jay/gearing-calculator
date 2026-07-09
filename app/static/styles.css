@@ -21,6 +21,7 @@
   --dial-red: #d3232b;
   --dial-hub: #23262a;
   --dial-hub-edge: #40454b;
+  --dial-amber: #f5a11d; /* classic BMW instrument backlighting */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -182,7 +183,7 @@ button:focus-visible {
   outline-offset: 1px;
 }
 
-input[type="range"] { width: 100%; accent-color: var(--accent); }
+input[type="range"] { width: 100%; accent-color: var(--dial-amber); }
 
 output {
   font-variant-numeric: tabular-nums;
@@ -253,19 +254,64 @@ fieldset.units label {
   color: var(--muted);
 }
 
-.gear-row .swatch {
-  display: inline-block;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 2px;
-  margin-right: 0.35rem;
-}
-
 /* -------------------------------- gauges -------------------------------- */
 .gauges {
+  position: relative;
+  container-type: inline-size;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  gap: 0.5rem;
+}
+
+/* Lifted out of the grid so it costs the dials no width. The dials are circles
+   in square boxes, which leaves a wedge of empty space between their lower
+   edges — the readout drops into it, where the cluster puts its warning lights. */
+.rpm-readout {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 0.1rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--dial-face-edge);
+  border: 1px solid var(--dial-bezel);
+  border-radius: 6px;
+}
+
+/* The digits are tabular, so reserving five slots keeps the box — and hence the
+   `auto` grid track and the dials either side of it — a constant width as the
+   rpm climbs from 0 to five figures. */
+/* The readout is a fixed size but the dials scale with the panel, so past a point
+   the wedge between them is too small to hold it and it drops below instead.
+   Keyed off the container, not the viewport: the panel is narrower at 1024px
+   (two columns) than at 900px (one), so viewport width says nothing useful here. */
+@container (max-width: 700px) {
+  .rpm-readout {
+    position: static;
+    transform: none;
+    grid-row: 2;
+    grid-column: 1 / -1;
+    justify-self: center;
+    margin-top: 0.75rem;
+  }
+}
+
+.rpm-readout output {
+  min-width: 5ch;
+  text-align: center;
+  color: var(--dial-amber);
+  font-size: 1.15rem;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.rpm-readout span {
+  color: var(--dial-ink-dim);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .gauge { width: 100%; height: auto; }
@@ -275,7 +321,8 @@ fieldset.units label {
 .gauge-bezel { fill: none; stroke: var(--dial-bezel); stroke-width: 2.5; }
 .gauge-tick-major { stroke: var(--dial-ink); stroke-width: 3.2; stroke-linecap: butt; }
 .gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1.8; }
-.gauge-redline-bar { stroke: var(--dial-red); stroke-width: 4; stroke-linecap: butt; }
+/* Stroke width spans the tick ring, so the arc reads as a band on the dial edge. */
+.gauge-redline { fill: none; stroke: var(--dial-red); stroke-width: 8; stroke-linecap: butt; }
 /* Numerals are sized to the widest label on the dial (see `numWidth` in app.js):
    a tach counting 0-7 can be big, a speedo counting to 300 cannot. */
 .gauge-tick-label {
@@ -291,14 +338,6 @@ fieldset.units label {
 .gauge-needle { fill: var(--dial-ink); }
 .gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
 .gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
-
-.gauge-value {
-  fill: var(--dial-ink);
-  font-size: 15px;
-  font-weight: 650;
-  text-anchor: middle;
-  font-variant-numeric: tabular-nums; /* or the readout jitters as the needle sweeps */
-}
 
 .controls {
   display: grid;
@@ -334,19 +373,28 @@ fieldset.units label {
 .chart-axis { stroke: var(--muted); stroke-width: 1.2; opacity: 0.7; }
 .chart-label { fill: var(--muted); font-size: 11px; }
 .chart-axis-title { fill: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
-.chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart-marker { stroke: var(--text); stroke-width: 1.5; }
-
-/* The shift trace annotates the gear curves rather than being one of them, so
-   it is drawn as dashed ink in the text color instead of taking a gear color. */
-.chart-trace {
+/* The gear rays are context, not the subject: what each gear *could* do at any
+   rpm. They recede to gray so the shift trace drawn over them reads first. */
+.chart-line {
   fill: none;
-  stroke: var(--text);
-  stroke-width: 2.25;
-  stroke-dasharray: 5 3;
+  stroke: var(--muted);
+  stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
-  opacity: 0.65;
+  opacity: 0.4;
+}
+
+.chart-gear-label { fill: var(--muted); font-size: 11px; font-weight: 600; }
+.chart-marker { fill: var(--dial-amber); stroke: var(--text); stroke-width: 1.5; }
+
+/* The actual acceleration run — up each gear, drop at every shift. This is the
+   subject of the plot, so it takes the amber. */
+.chart-trace {
+  fill: none;
+  stroke: var(--dial-amber);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }
 
 .chart-shift { fill: var(--text); opacity: 0.65; }
@@ -368,12 +416,8 @@ fieldset.units label {
   border-radius: 2px;
 }
 
-/* Mirrors .chart-trace's dashes so the legend entry is recognisable. */
-.legend .swatch-trace {
-  background: repeating-linear-gradient(90deg, var(--text) 0 4px, transparent 4px 7px);
-  opacity: 0.65;
-  border-radius: 0;
-}
+/* Mirrors .chart-trace's solid amber so the legend entry is recognisable. */
+.legend .swatch-trace { background: var(--dial-amber); }
 
 /* -------------------------------- table --------------------------------- */
 .table-wrap { overflow-x: auto; }

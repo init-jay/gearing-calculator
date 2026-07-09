@@ -103,6 +103,11 @@
         <div class="gauges">
           <svg id="speedo" class="gauge" viewBox="0 0 200 200" role="img"
                aria-label="Speedometer"></svg>
+          <!-- Sits where the cluster puts its warning lights, between the dials. -->
+          <div class="rpm-readout">
+            <output id="rpm_out" for="cur_speed">0</output>
+            <span>rpm</span>
+          </div>
           <svg id="tach" class="gauge" viewBox="0 0 200 200" role="img"
                aria-label="Tachometer"></svg>
         </div>

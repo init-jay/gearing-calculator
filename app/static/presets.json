@@ -1,5 +1,5 @@
 {
-  "note": "Starting points, not specifications. Entries with a generic name (\"Six-speed, close ratio\") are archetypes typical of their type, and every torque curve is a smooth archetype rather than a measured dyno pull. Entries named after a real part carry the ratios their contributor supplied, which is not the same as verified. Treat any preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline.",
+  "note": "Starting points, not specifications. Entries with a generic name (\"Six-speed, close ratio\", \"Turbo four, broad plateau\") are archetypes typical of their type and correspond to no real part. Entries named after a real part carry figures a contributor supplied: the N52B30 curve is read by eye off a published *modelled* curve (automobile-catalog / ProfessCars), not a measured dyno pull, though it does reproduce that source's quoted 200 kW at 6700 rpm and 320 N·m at 2750. None of it is verified against hardware. Treat every preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline.",
 
   "gearboxes": [
     {
@@ -13,6 +13,10 @@
     {
       "name": "ZH-6HP19",
       "gears": [4.171, 2.34, 1.521, 1.143, 0.867, 0.691]
+    },
+    {
+      "name": "Aisin TL70-AZ6",
+      "gears": [3.538, 2.106, 1.36, 1.0, 0.834, 0.702]
     },
     {
       "name": "Five-speed, wide ratio",
@@ -41,6 +45,33 @@
   ],
 
   "engines": [
+    {
+      "name": "N52B30",
+      "redline": 7000,
+      "torque_curve": [
+        [1000, 165], [1500, 258], [2000, 295], [2500, 317],
+        [2750, 320], [3000, 320], [3500, 318], [4000, 314],
+        [5000, 307], [6000, 296], [6700, 285], [7000, 260]
+      ]
+    },
+    {
+      "name": "S54B32",
+      "redline": 7900,
+      "torque_curve": [
+        [1000, 160], [1500, 240], [2000, 285], [2500, 313],
+        [3000, 327], [4000, 345], [4900, 355], [5500, 353],
+        [6000, 348], [6500, 338], [7000, 325], [7900, 300]
+      ]
+    },
+    {
+      "name": "FA24",
+      "redline": 7400,
+      "torque_curve": [
+        [1000, 122], [1500, 175], [2000, 208], [2500, 226],
+        [3000, 240], [3500, 249], [3700, 250], [4300, 250],
+        [5000, 247], [6000, 243], [7000, 236], [7400, 199]
+      ]
+    },
     {
       "name": "Naturally aspirated six",
       "redline": 7000,

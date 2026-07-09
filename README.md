@@ -56,9 +56,25 @@ formulas are verifiable without a browser.
 
 ## The model
 
+Metric is the default:
+
 ```
 overall_ratio = gear_ratio × final_drive × transfer_case
+speed_kmh     = rpm × π × tire_diameter_mm / overall_ratio × (1 − slip) × 60 / 1e6
+```
+
+Selecting imperial units swaps the tire diameter to inches and the output to mph:
+
+```
 speed_mph     = rpm × tire_diameter_in / (overall_ratio × 336.135) × (1 − slip)
 ```
 
 where `336.135 = 63360 / (π × 60)` converts inches-per-minute to miles-per-hour.
+
+Tire diameter is derived from a standard tire size — `225/45R17` is a 225 mm
+section width, a sidewall 45% of that width, on a 17 in wheel — with the
+sidewall counted once above the rim and once below:
+
+```
+tire_diameter_mm = wheel_diameter_in × 25.4 + 2 × section_width_mm × aspect / 100
+```

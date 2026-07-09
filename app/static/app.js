@@ -5,10 +5,9 @@
  * this file only gathers inputs, calls into Python, and draws SVG.
  */
 
-const DEFAULT_GEARS = [3.6, 2.1, 1.4, 1.0, 0.8];
+const DEFAULT_GEARS = [3.6, 2.1, 1.4, 1.0, 0.8, 0.65];
 const MAX_GEARS = 8;
 const MIN_GEARS = 1;
-const IN_TO_MM = 25.4;
 
 const GEAR_COLORS = [
   "#2f6fed", "#e0803a", "#3aa76d", "#d64545",
@@ -21,6 +20,7 @@ const gearColor = (i) => GEAR_COLORS[i % GEAR_COLORS.length];
 let pyodide = null;
 let pyCompute = null;
 let pySpeedAtRpm = null;
+let pyTireDiameter = null;
 let lastResult = null;
 
 /* ------------------------------- geometry -------------------------------- */
@@ -239,19 +239,35 @@ function gearInputs() {
   return [...document.querySelectorAll(".gear-input")];
 }
 
+const currentUnits = () => document.querySelector('input[name="units"]:checked').value;
+
+const num = (id, fallback) => {
+  const v = parseFloat($(id).value);
+  return Number.isFinite(v) ? v : fallback;
+};
+
+/**
+ * Derive the tire diameter from the 225/45R17-style size inputs and write it
+ * into the read-only `#tire` field, in whichever unit is currently selected.
+ * Must run before `readInputs`, which treats `#tire` as the source of truth.
+ */
+function updateTireDiameter() {
+  const units = currentUnits();
+  const dia = pyTireDiameter(
+    num("#tire_width", 225), num("#tire_aspect", 45), num("#tire_wheel", 17), units
+  );
+  $("#tire").value = dia.toFixed(units === "metric" ? 1 : 2);
+}
+
 function readInputs() {
-  const num = (id, fallback) => {
-    const v = parseFloat($(id).value);
-    return Number.isFinite(v) ? v : fallback;
-  };
   return {
     gears: gearInputs().map((el) => parseFloat(el.value)).filter((v) => Number.isFinite(v) && v > 0),
     final_drive: num("#final_drive", 3.9),
     transfer: num("#transfer", 1.0),
-    tire: num("#tire", 25),
+    tire: num("#tire", 634.3),
     slip: num("#slip", 0) / 100,
     max_rpm: num("#max_rpm", 7000),
-    units: document.querySelector('input[name="units"]:checked').value,
+    units: currentUnits(),
   };
 }
 
@@ -306,6 +322,7 @@ function syncGearSelect() {
 
 /** Recompute all gear curves via Python, then redraw everything. */
 function recompute() {
+  updateTireDiameter();
   const inputs = readInputs();
   if (inputs.gears.length === 0) return;
 
@@ -366,21 +383,19 @@ function redraw() {
 /* ---------------------------------- init --------------------------------- */
 
 function onUnitChange() {
-  // Convert the tire diameter so the physical tire stays the same.
-  const tire = $("#tire");
-  const units = document.querySelector('input[name="units"]:checked').value;
-  const v = parseFloat(tire.value);
-  if (Number.isFinite(v)) {
-    tire.value = units === "metric" ? (v * IN_TO_MM).toFixed(0) : (v / IN_TO_MM).toFixed(1);
-  }
-  tire.step = units === "metric" ? "1" : "0.1";
-  document.querySelector("[data-tire-unit]").textContent = units === "metric" ? "mm" : "in";
+  // The tire size itself is unit-agnostic; `recompute` re-derives the diameter
+  // in the newly selected unit, so only the label needs updating here.
+  document.querySelector("[data-tire-unit]").textContent =
+    currentUnits() === "metric" ? "mm" : "in";
   recompute();
 }
 
 function wireEvents() {
   // Any change to a calculator input re-runs the Python math.
-  for (const id of ["#tire", "#final_drive", "#transfer", "#slip", "#max_rpm"]) {
+  for (const id of [
+    "#tire_width", "#tire_aspect", "#tire_wheel",
+    "#final_drive", "#transfer", "#slip", "#max_rpm",
+  ]) {
     $(id).addEventListener("input", recompute);
   }
   $("#gear-list").addEventListener("input", recompute);
@@ -417,6 +432,7 @@ async function main() {
   pyodide.runPython(src);
   pyCompute = pyodide.globals.get("compute");
   pySpeedAtRpm = pyodide.globals.get("speed_at_rpm");
+  pyTireDiameter = pyodide.globals.get("tire_diameter");
 
   buildGearRows(DEFAULT_GEARS);
   syncGearSelect();

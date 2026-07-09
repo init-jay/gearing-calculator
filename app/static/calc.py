@@ -9,14 +9,16 @@ The model relates engine RPM to road speed through the drivetrain::
     overall_ratio = gear_ratio * final_drive * transfer_case
     speed = rpm * tire_circumference / overall_ratio * (1 - slip)  (per minute)
 
-with unit conversions folded in for mph (tire diameter in inches) and km/h
-(tire diameter in mm).
+with unit conversions folded in for km/h (tire diameter in mm, the default) and
+mph (tire diameter in inches).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import pi
+
+MM_PER_INCH = 25.4
 
 # Imperial constant: mph = rpm * tire_dia_in / (overall_ratio * MPH_CONST).
 # Derivation: inches/hour = rpm * pi * dia * 60; miles/hour divides by 63360,
@@ -31,6 +33,34 @@ def _validate_units(units: Units) -> None:
         raise ValueError(f"units must be 'imperial' or 'metric', got {units!r}")
 
 
+def tire_diameter(
+    section_width: float,
+    aspect_ratio: float,
+    wheel_diameter: float,
+    units: Units = "metric",
+) -> float:
+    """Overall tire diameter from a standard tire size, e.g. 225/45R17.
+
+    ``section_width`` is the tread width in mm, ``aspect_ratio`` is the sidewall
+    height as a percentage of that width, and ``wheel_diameter`` is the rim
+    diameter in inches — the three numbers as printed on the sidewall, in the
+    units they are always printed in, regardless of ``units``.
+
+    ``units`` selects the *return* unit: mm for metric, inches for imperial.
+    The sidewall is counted twice, once above the rim and once below.
+    """
+    _validate_units(units)
+    if section_width <= 0 or aspect_ratio <= 0 or wheel_diameter <= 0:
+        raise ValueError("tire dimensions must be positive")
+    mm = wheel_diameter * MM_PER_INCH + 2.0 * section_width * aspect_ratio / 100.0
+    return mm if units == "metric" else mm / MM_PER_INCH
+
+
+# Stock tire, used for the default inputs below and by the frontend's form.
+DEFAULT_TIRE_SIZE = (225.0, 45.0, 17.0)
+DEFAULT_TIRE_MM = tire_diameter(*DEFAULT_TIRE_SIZE)  # 634.3 mm
+
+
 def overall_ratio(gear_ratio: float, final_drive: float, transfer: float) -> float:
     """Total drivetrain reduction from crankshaft to wheel."""
     return gear_ratio * final_drive * transfer
@@ -43,12 +73,12 @@ def speed_at_rpm(
     transfer: float,
     tire: float,
     slip: float = 0.0,
-    units: Units = "imperial",
+    units: Units = "metric",
 ) -> float:
     """Road speed at a given engine ``rpm`` in the selected gear.
 
-    ``tire`` is the tire *diameter* — inches for imperial (returns mph), or
-    millimetres for metric (returns km/h). ``slip`` is torque-converter slip as
+    ``tire`` is the tire *diameter* — millimetres for metric (returns km/h), or
+    inches for imperial (returns mph). ``slip`` is torque-converter slip as
     a fraction in ``[0, 1)`` and reduces effective speed.
     """
     _validate_units(units)
@@ -70,7 +100,7 @@ def rpm_at_speed(
     transfer: float,
     tire: float,
     slip: float = 0.0,
-    units: Units = "imperial",
+    units: Units = "metric",
 ) -> float:
     """Inverse of :func:`speed_at_rpm` — engine rpm needed to hold ``speed``."""
     _validate_units(units)
@@ -101,10 +131,10 @@ class Inputs:
     gears: list[float]
     final_drive: float = 3.9
     transfer: float = 1.0
-    tire: float = 25.0
+    tire: float = DEFAULT_TIRE_MM
     slip: float = 0.0
     max_rpm: float = 7000.0
-    units: Units = "imperial"
+    units: Units = "metric"
 
     @classmethod
     def from_dict(cls, data: dict) -> "Inputs":
@@ -113,10 +143,10 @@ class Inputs:
             gears=[float(g) for g in data["gears"] if float(g) > 0],
             final_drive=float(data.get("final_drive", 3.9)),
             transfer=float(data.get("transfer", 1.0)),
-            tire=float(data.get("tire", 25.0)),
+            tire=float(data.get("tire", DEFAULT_TIRE_MM)),
             slip=float(data.get("slip", 0.0)),
             max_rpm=float(data.get("max_rpm", 7000.0)),
-            units=data.get("units", "imperial"),
+            units=data.get("units", "metric"),
         )
 
 

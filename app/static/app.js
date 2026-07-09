@@ -115,18 +115,11 @@ const R_FACE = 95;
 const R_TICK = 88; // outer edge of the tick ring; ticks grow inward from here
 const R_MAJOR_IN = 76;
 const R_MINOR_IN = 81;
+const R_RED = 84; // centreline of the redline arc, spanning the tick ring's width
 const R_LABEL = 62;
 const R_NEEDLE = 70;
 const R_HUB = 13;
 const NEEDLE_TAIL = 9; // counterweight stub, kept shorter than the hub that hides it
-
-// Where the redline arc(s) sit. A lone band fills the tick ring's width; two
-// stack concentrically, the reference setup outside, so neither hides the other.
-const RED_SINGLE = [{ r: 84, w: 8 }];
-const RED_DOUBLE = [
-  { r: 85.75, w: 4.5 },
-  { r: 79.5, w: 4.5 },
-];
 
 /** A radial line from `r1` out to `r2` at `angle`. */
 function spoke(cls, cx, cy, r1, r2, angle) {
@@ -159,14 +152,18 @@ function needlePolygon(cls, cx, cy, angleDeg) {
  * and `legend` printed below the hub. Like the real cluster it carries no digital
  * readout; the live rpm is shown between the dials instead.
  *
- * `needles` are drawn back-to-front, so `needles[0]` — the reference setup — ends
- * up on top. Each `bands` entry is a `{from, to}` span of dial values painted red.
+ * The face is one instrument — a single scale and a single red band, sized to the
+ * higher of the compared setups — but it carries a `needles` entry per setup, so
+ * the comparison is read as the gap between two needles on one dial rather than
+ * two dials to look back and forth between. They are drawn back to front, so
+ * `needles[0]` ends up on top.
+ * `redlineAt` (a value, optional) marks the band from there to `max` in red.
  */
-function renderGauge(svg, { max, step, legend, needles, bands = [] }) {
+function renderGauge(svg, { needles, max, step, legend, redlineAt = null }) {
   const cx = 100;
   const cy = 100;
   const angleFor = (v) => GAUGE_START + (max > 0 ? v / max : 0) * GAUGE_SWEEP;
-  const inRedline = (v) => bands.some((b) => v > b.from && v < b.to);
+  const inRedline = (v) => redlineAt !== null && v >= redlineAt;
 
   svg.replaceChildren();
 
@@ -210,29 +207,21 @@ function renderGauge(svg, { max, step, legend, needles, bands = [] }) {
     }
   }
 
-  // Unbroken arcs, inset at both ends so each sits between the major ticks
-  // bounding it rather than on top of them.
-  const geom = bands.length > 1 ? RED_DOUBLE : RED_SINGLE;
-  bands.forEach((band, i) => {
-    if (band.from >= max) return;
-    const from = angleFor(band.from) + REDLINE_INSET_DEG;
-    const to = angleFor(Math.min(band.to, max)) - REDLINE_INSET_DEG;
-    if (to <= from) return;
-    const { r, w } = geom[Math.min(i, geom.length - 1)];
-    svg.append(
-      svgEl("path", {
-        class: i === 0 ? "gauge-redline" : "gauge-redline gauge-redline-b",
-        // An attribute, not CSS: the width depends on how many bands there are.
-        "stroke-width": w,
-        d: arcPath(cx, cy, r, from, to),
-      })
-    );
-  });
+  // One unbroken arc, inset at both ends so it sits between the major ticks
+  // bounding the band rather than on top of them.
+  if (redlineAt !== null && redlineAt < max) {
+    const from = angleFor(redlineAt) + REDLINE_INSET_DEG;
+    const to = angleFor(max) - REDLINE_INSET_DEG;
+    if (to > from) {
+      svg.append(svgEl("path", { class: "gauge-redline", d: arcPath(cx, cy, R_RED, from, to) }));
+    }
+  }
 
   legend.forEach((line, i) => {
     svg.append(svgEl("text", { class: "gauge-legend", x: cx, y: cy + 30 + i * 11 }, line));
   });
 
+  // Reversed so the first entry — the reference setup — is drawn last, on top.
   [...needles].reverse().forEach(({ value, cls }) => {
     const clamped = Math.max(0, Math.min(value, max));
     svg.append(needlePolygon(cls, cx, cy, angleFor(clamped)));
@@ -996,30 +985,26 @@ function redraw() {
   $("#cur_speed_out").textContent = String(Math.round(speed));
   $("#cur_gear").textContent = series.map((s) => s.at.gear).join(" / ");
 
-  // The dial spans the highest redline of the two, and each setup's red band is
-  // the last major segment of its own (rounded-up) redline — so equal redlines
-  // collapse to a single arc and only a real difference draws a second one.
+  // One face for both setups: the scale spans the taller redline and the red band
+  // is that dial's own last major segment, so the two needles are read against the
+  // same markings. Two scales, or two red bands at different radii, would mean the
+  // gap between the needles no longer stood for a difference in rpm.
   const tach = rpmScale(Math.max(...series.map((s) => s.inputs.max_rpm)));
-  const bands = [];
-  for (const s of series) {
-    const to = Math.ceil(s.inputs.max_rpm / tach.step) * tach.step;
-    if (!bands.some((b) => b.to === to)) bands.push({ from: to - tach.step, to });
-  }
-
   renderGauge($("#tach"), {
+    needles: series.map((s) => ({ value: s.at.rpm, cls: `gauge-needle gauge-needle-${s.key}` })),
     ...tach,
     legend: tach.max >= 1000 ? ["1/min", "×1000"] : ["1/min"],
-    needles: series.map((s) => ({ value: s.at.rpm, cls: `gauge-needle gauge-needle-${s.key}` })),
-    bands,
+    redlineAt: tach.max - tach.step, // the last major segment, i.e. the top 1000 rpm
   });
 
-  // Road speed is shared, so the speedometer carries a single needle whatever the
-  // comparison; only its scale grows to cover the faster setup.
+  // Road speed is the shared independent variable — both setups are always at the
+  // slider's speed — so a second speedo needle would land exactly on the first.
+  // Only the scale grows, to cover the faster setup's top speed.
   const speedScale = gaugeScale(Math.max(1, ...series.map((s) => s.result.max_speed)));
   renderGauge($("#speedo"), {
+    needles: [{ value: speed, cls: "gauge-needle" }],
     ...speedScale,
     legend: [series[0].result.speed_unit],
-    needles: [{ value: speed, cls: "gauge-needle gauge-needle-a" }],
   });
 
   for (const s of series) {

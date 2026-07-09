@@ -148,9 +148,15 @@ main {
 
 .viz > summary::-webkit-details-marker { display: none; }
 
+/* Sized off the summary's own text (1em), not a fixed rem, so the caret and the
+   heading stay matched. The fixed box keeps the label still while it rotates. */
 .viz > summary::before {
   content: "▾";
-  font-size: 0.7rem;
+  display: inline-block;
+  width: 1em;
+  font-size: 1em;
+  line-height: 1;
+  text-align: center;
   color: var(--muted);
   transition: transform 0.15s ease;
 }
@@ -464,12 +470,8 @@ fieldset.units label {
 .gauge-bezel { fill: none; stroke: var(--dial-bezel); stroke-width: 2.5; }
 .gauge-tick-major { stroke: var(--dial-ink); stroke-width: 3.2; stroke-linecap: butt; }
 .gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1.8; }
-/* stroke-width is set per-arc in app.js: a lone band spans the tick ring's full
-   width, two share it. CSS would beat the presentation attribute, so it is
-   deliberately absent here. */
-.gauge-redline { fill: none; stroke: var(--dial-red); stroke-linecap: butt; }
-/* Setup B's band, inboard of A's and dimmed so A stays the one you read. */
-.gauge-redline-b { opacity: 0.55; }
+/* Stroke width spans the tick ring, so the arc reads as a band on the dial edge. */
+.gauge-redline { fill: none; stroke: var(--dial-red); stroke-width: 8; stroke-linecap: butt; }
 /* Numerals are sized to the widest label on the dial (see `numWidth` in app.js):
    a tach counting 0-7 can be big, a speedo counting to 300 cannot. */
 .gauge-tick-label {
@@ -483,9 +485,15 @@ fieldset.units label {
 .gauge[data-num-width="medium"] .gauge-tick-label { font-size: 14px; }
 .gauge[data-num-width="wide"] .gauge-tick-label { font-size: 12px; }
 .gauge-needle { fill: var(--dial-ink); }
-/* Setup B's needle, drawn under A's. A real cluster has one needle; the colour
-   is what tells you this one is the comparison rather than the instrument. */
-.gauge-needle-b { fill: var(--dial-blue); opacity: 0.9; }
+
+/* Comparing puts a needle per setup on the one tach face. They take the setup's
+   colour — the same amber and blue as its number in the readout and its trace on
+   the charts — so which needle is which needs no legend. A lone needle stays the
+   instrument's own white; the speedometer's always is, since road speed is shared
+   and its second needle would sit exactly on the first. */
+.gauges[data-compare] .gauge-needle-a { fill: var(--dial-amber); }
+.gauge-needle-b { fill: var(--dial-blue); }
+
 .gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
 .gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
 
@@ -635,7 +643,12 @@ th, td {
   white-space: nowrap;
 }
 
-th:first-child, td:first-child { text-align: left; }
+/* Only the key column is left-aligned — the leading "Gear"/"Shift" header and the
+   row headers under it. Not `:first-child`: while comparing, the sub-header row
+   starts with an "A", which is a value column and must stay right-aligned with
+   the numbers it labels. */
+thead tr:first-child > th:first-child,
+tbody th[scope="row"] { text-align: left; }
 
 th {
   font-size: 0.75rem;

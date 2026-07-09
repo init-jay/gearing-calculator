@@ -31,14 +31,6 @@ function polar(cx, cy, r, angleDeg) {
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
 }
 
-/** SVG arc path from `startAngle` to `endAngle` (clockwise). */
-function arcPath(cx, cy, r, startAngle, endAngle) {
-  const [x1, y1] = polar(cx, cy, r, startAngle);
-  const [x2, y2] = polar(cx, cy, r, endAngle);
-  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
-  return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
-}
-
 const svgEl = (name, attrs = {}, text = null) => {
   const el = document.createElementNS("http://www.w3.org/2000/svg", name);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
@@ -70,52 +62,118 @@ function gaugeScale(rawMax, maxTicks = 7) {
   return { max: rawMax, step: rawMax / 5 };
 }
 
+// One minor tick at each half-step, as on the reference cluster. Retune here.
+const MINOR_PER_MAJOR = 2;
+
+const R_BEZEL = 97;
+const R_FACE = 95;
+const R_TICK = 88; // outer edge of the tick ring; ticks grow inward from here
+const R_MAJOR_IN = 76;
+const R_MINOR_IN = 81;
+const R_RED_IN = 80;
+const R_LABEL = 62;
+const R_NEEDLE = 70;
+const R_HUB = 13;
+const NEEDLE_TAIL = 9; // counterweight stub, kept shorter than the hub that hides it
+
+/** A radial line from `r1` out to `r2` at `angle`. */
+function spoke(cls, cx, cy, r1, r2, angle) {
+  const [x1, y1] = polar(cx, cy, r1, angle);
+  const [x2, y2] = polar(cx, cy, r2, angle);
+  return svgEl("line", { class: cls, x1, y1, x2, y2 });
+}
+
 /**
- * Draw a round gauge: track arc, filled value arc, ticks, needle, readout.
- * `redlineAt` (a value, optional) shades the track from there to `max` in red.
+ * Draw a round instrument dial: dark face, tick ring, numerals, tapered needle,
+ * printed `legend` lines above the hub and the live value below it.
+ * `redlineAt` (a value, optional) marks the band from there to `max` in red.
  */
-function renderGauge(svg, { value, max, step, label, unit, decimals = 0, redlineAt = null }) {
+function renderGauge(svg, { value, max, step, legend, decimals = 0, redlineAt = null }) {
   const cx = 100;
-  const cy = 92;
-  const r = 66;
+  const cy = 100;
   const clamped = Math.max(0, Math.min(value, max));
   const angleFor = (v) => GAUGE_START + (max > 0 ? v / max : 0) * GAUGE_SWEEP;
   const valueAngle = angleFor(clamped);
+  const inRedline = (v) => redlineAt !== null && v >= redlineAt;
 
   svg.replaceChildren();
 
-  svg.append(svgEl("path", { class: "gauge-face", d: arcPath(cx, cy, r, GAUGE_START, GAUGE_END) }));
+  // Both dials live in one document, so gradient ids must not collide.
+  const faceId = `${svg.id}-face`;
+  // Stop colors come from CSS: `var()` is unreliable in presentation attributes.
+  const grad = svgEl("radialGradient", { id: faceId });
+  grad.append(svgEl("stop", { class: "gauge-face-center", offset: "0" }));
+  grad.append(svgEl("stop", { class: "gauge-face-edge", offset: "1" }));
+  const defs = svgEl("defs");
+  defs.append(grad);
+  svg.append(defs);
 
-  if (redlineAt !== null && redlineAt < max) {
-    svg.append(
-      svgEl("path", { class: "gauge-redline", d: arcPath(cx, cy, r, angleFor(redlineAt), GAUGE_END) })
-    );
-  }
+  svg.append(svgEl("circle", { cx, cy, r: R_FACE, fill: `url(#${faceId})` }));
+  svg.append(svgEl("circle", { class: "gauge-bezel", cx, cy, r: R_BEZEL }));
 
-  if (clamped > 0) {
-    svg.append(svgEl("path", { class: "gauge-arc", d: arcPath(cx, cy, r, GAUGE_START, valueAngle) }));
-  }
+  const big = max >= 1000; // numerals in thousands to keep the dial uncluttered
+  const majors = Math.round(max / step);
 
-  const big = max >= 1000; // label in thousands to keep the dial uncluttered
-  for (let v = 0; v <= max + step / 1000; v += step) {
+  const labels = Array.from({ length: majors + 1 }, (_, i) => {
+    const shown = big ? (i * step) / 1000 : i * step;
+    return Number.isInteger(shown) ? String(shown) : shown.toFixed(1);
+  });
+
+  // One dial shows "7", another "300". Size the numerals to the widest of them
+  // so three-digit scales don't collide and single-digit ones aren't tiny.
+  const widest = Math.max(...labels.map((s) => s.length));
+  svg.dataset.numWidth = widest <= 1 ? "narrow" : widest <= 2 ? "medium" : "wide";
+
+  for (let i = 0; i <= majors * MINOR_PER_MAJOR; i++) {
+    const v = (i / MINOR_PER_MAJOR) * step;
     const angle = angleFor(v);
-    const [ix, iy] = polar(cx, cy, r - 9, angle);
-    const [ox, oy] = polar(cx, cy, r - 2, angle);
-    svg.append(svgEl("line", { class: "gauge-tick", x1: ix, y1: iy, x2: ox, y2: oy }));
 
-    const [lx, ly] = polar(cx, cy, r - 21, angle);
-    const shown = big ? v / 1000 : v;
-    const txt = Number.isInteger(shown) ? String(shown) : shown.toFixed(1);
-    svg.append(svgEl("text", { class: "gauge-tick-label", x: lx, y: ly + 3 }, txt));
+    if (i % MINOR_PER_MAJOR === 0) {
+      svg.append(spoke("gauge-tick-major", cx, cy, R_MAJOR_IN, R_TICK, angle));
+      const [lx, ly] = polar(cx, cy, R_LABEL, angle);
+      svg.append(svgEl("text", { class: "gauge-tick-label", x: lx, y: ly }, labels[i / MINOR_PER_MAJOR]));
+    } else if (!inRedline(v)) {
+      // Minor ticks would collide with the red bars, so the band gets only bars.
+      svg.append(spoke("gauge-tick-minor", cx, cy, R_MINOR_IN, R_TICK, angle));
+    }
   }
 
-  const [nx, ny] = polar(cx, cy, r - 16, valueAngle);
-  svg.append(svgEl("line", { class: "gauge-needle", x1: cx, y1: cy, x2: nx, y2: ny }));
-  svg.append(svgEl("circle", { class: "gauge-hub", cx, cy, r: 3.5 }));
+  // Bars are spread evenly across the band so one lands exactly on `max`, rather
+  // than marching in from `redlineAt` and stopping short of the last tick.
+  if (redlineAt !== null && redlineAt < max) {
+    const bars = Math.max(2, Math.round((max - redlineAt) / (step / 5)));
+    for (let i = 0; i <= bars; i++) {
+      const v = redlineAt + (i / bars) * (max - redlineAt);
+      svg.append(spoke("gauge-redline-bar", cx, cy, R_RED_IN, R_TICK, angleFor(v)));
+    }
+  }
 
-  // Readout sits below the dial's open bottom so it can't collide with ticks.
-  svg.append(svgEl("text", { class: "gauge-value", x: cx, y: 152 }, clamped.toFixed(decimals)));
-  svg.append(svgEl("text", { class: "gauge-label", x: cx, y: 169 }, `${label} · ${unit}`));
+  legend.forEach((line, i) => {
+    svg.append(svgEl("text", { class: "gauge-legend", x: cx, y: cy - 34 + i * 11 }, line));
+  });
+
+  // Tapered needle: narrow at the tip, wide across the tail. `u` runs along the
+  // needle, `p` across it.
+  const rad = ((valueAngle - 90) * Math.PI) / 180;
+  const [ux, uy] = [Math.cos(rad), Math.sin(rad)];
+  const [px, py] = [-uy, ux];
+  const pt = (along, across) => `${cx + along * ux + across * px},${cy + along * uy + across * py}`;
+  svg.append(
+    svgEl("polygon", {
+      class: "gauge-needle",
+      points: [
+        pt(R_NEEDLE, 1.0),
+        pt(R_NEEDLE, -1.0),
+        pt(-NEEDLE_TAIL, -3.6),
+        pt(-NEEDLE_TAIL, 3.6),
+      ].join(" "),
+    })
+  );
+
+  // Drawn after the needle so its base disappears beneath the hub cap.
+  svg.append(svgEl("circle", { class: "gauge-hub", cx, cy, r: R_HUB }));
+
+  svg.append(svgEl("text", { class: "gauge-value", x: cx, y: cy + 40 }, clamped.toFixed(decimals)));
 }
 
 /* --------------------------------- chart --------------------------------- */
@@ -411,14 +469,14 @@ function redraw() {
 
   const tachScale = gaugeScale(inputs.max_rpm);
   renderGauge($("#tach"), {
-    value: rpm, ...tachScale, label: "RPM",
-    unit: tachScale.max >= 1000 ? "×1000" : "rpm",
+    value: rpm, ...tachScale,
+    legend: tachScale.max >= 1000 ? ["1/min", "×1000"] : ["1/min"],
     redlineAt: inputs.max_rpm * 0.85,
   });
 
   const speedScale = gaugeScale(Math.max(lastResult.max_speed, 1));
   renderGauge($("#speedo"), {
-    value: speed, ...speedScale, label: "Speed", unit: lastResult.speed_unit,
+    value: speed, ...speedScale, legend: [lastResult.speed_unit],
   });
 
   renderChart($("#chart"), lastResult, { rpm, speed, gearIndex });

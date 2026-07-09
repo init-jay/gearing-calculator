@@ -9,6 +9,18 @@
   --grid: #e6e9ee;
   --needle: #d64545;
   --radius: 12px;
+
+  /* The dials are a physical instrument, not a chart: they keep this palette in
+     both color schemes, so they are deliberately absent from the dark-mode
+     block below. Don't "fix" that omission — it is what makes them fixed. */
+  --dial-face: #1a1d21;
+  --dial-face-edge: #050607;
+  --dial-bezel: #3d434a;
+  --dial-ink: #f2f4f6;
+  --dial-ink-dim: #aeb4bb;
+  --dial-red: #d3232b;
+  --dial-hub: #23262a;
+  --dial-hub-edge: #40454b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -258,15 +270,35 @@ fieldset.units label {
 
 .gauge { width: 100%; height: auto; }
 
-.gauge-face { fill: none; stroke: var(--grid); stroke-width: 10; }
-.gauge-arc { fill: none; stroke: var(--accent); stroke-width: 10; }
-.gauge-redline { fill: none; stroke: var(--needle); stroke-width: 10; opacity: 0.55; }
-.gauge-tick { stroke: var(--muted); stroke-width: 1.5; opacity: 0.6; }
-.gauge-tick-label { fill: var(--muted); font-size: 9px; text-anchor: middle; }
-.gauge-needle { stroke: var(--needle); stroke-width: 2.5; stroke-linecap: round; }
-.gauge-hub { fill: var(--needle); }
-.gauge-value { fill: var(--text); font-size: 21px; font-weight: 650; text-anchor: middle; }
-.gauge-label { fill: var(--muted); font-size: 10px; text-anchor: middle; letter-spacing: 0.06em; }
+.gauge-face-center { stop-color: var(--dial-face); }
+.gauge-face-edge { stop-color: var(--dial-face-edge); }
+.gauge-bezel { fill: none; stroke: var(--dial-bezel); stroke-width: 2.5; }
+.gauge-tick-major { stroke: var(--dial-ink); stroke-width: 3.2; stroke-linecap: butt; }
+.gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1.8; }
+.gauge-redline-bar { stroke: var(--dial-red); stroke-width: 4; stroke-linecap: butt; }
+/* Numerals are sized to the widest label on the dial (see `numWidth` in app.js):
+   a tach counting 0-7 can be big, a speedo counting to 300 cannot. */
+.gauge-tick-label {
+  fill: var(--dial-ink);
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.gauge[data-num-width="narrow"] .gauge-tick-label { font-size: 17px; }
+.gauge[data-num-width="medium"] .gauge-tick-label { font-size: 14px; }
+.gauge[data-num-width="wide"] .gauge-tick-label { font-size: 12px; }
+.gauge-needle { fill: var(--dial-ink); }
+.gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
+.gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
+
+.gauge-value {
+  fill: var(--dial-ink);
+  font-size: 15px;
+  font-weight: 650;
+  text-anchor: middle;
+  font-variant-numeric: tabular-nums; /* or the readout jitters as the needle sweeps */
+}
 
 .controls {
   display: grid;

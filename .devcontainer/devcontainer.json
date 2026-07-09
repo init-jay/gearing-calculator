@@ -2,18 +2,23 @@
   "name": "gearing-calculator",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {}
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false
+    },
+    "ghcr.io/devcontainers-extra/features/uv:1": {}
   },
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
+        "ms-python.vscode-pylance",
+        "anthropic.claude-code"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python"
       }
     }
   },
-  "postCreateCommand": "[ -f requirements.txt ] && pip install --user -r requirements.txt || true"
+  // "postCreateCommand": "[ -f requirements.txt ] && pip install --user -r requirements.txt || true"
 }

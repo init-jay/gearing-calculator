@@ -1,10 +1,18 @@
 {
-  "note": "Starting points, not specifications. The gearbox ratios are typical of their type and the torque curves are smooth archetypes rather than measured dyno pulls, so treat any preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline.",
+  "note": "Starting points, not specifications. Entries with a generic name (\"Six-speed, close ratio\") are archetypes typical of their type, and every torque curve is a smooth archetype rather than a measured dyno pull. Entries named after a real part carry the ratios their contributor supplied, which is not the same as verified. Treat any preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline.",
 
   "gearboxes": [
     {
-      "name": "Six-speed, stock",
+      "name": "GS6-37DZ",
       "gears": [5.14, 2.83, 1.79, 1.26, 1.0, 0.83]
+    },
+    {
+      "name": "GS6-37BZ",
+      "gears": [4.35, 2.496, 1.665, 1.234, 1.0, 0.851]
+    },
+    {
+      "name": "ZH-6HP19",
+      "gears": [4.171, 2.34, 1.521, 1.143, 0.867, 0.691]
     },
     {
       "name": "Five-speed, wide ratio",

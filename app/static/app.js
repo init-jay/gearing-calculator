@@ -564,79 +564,142 @@ function renderPeaks(el, series) {
 
 /* --------------------------------- table --------------------------------- */
 
-/** Append a `<tr>` of text cells, interleaving setups so like rows sit adjacent. */
-function addRow(tbody, cells, current) {
-  const tr = document.createElement("tr");
-  if (current) tr.className = "is-current";
-  for (const text of cells) {
-    const td = document.createElement("td");
-    td.textContent = text;
-    tr.append(td);
+const cellEl = (tag, text, attrs = {}) => {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, v);
+  return el;
+};
+
+/**
+ * Render a table whose value columns each split into one sub-column per setup
+ * while comparing, so A's third gear sits beside B's rather than a row below it.
+ *
+ * `spec.rows(s)` is how many rows that setup contributes; the table takes the
+ * longest, and a setup with fewer gears gets an em dash. Rows are keyed by index
+ * — gear 3 is gear 3 in both setups — which is what makes them comparable at all.
+ *
+ *   spec.key   { label, of(i) }        the leading, unsplit column
+ *   spec.cols  [{ label(result), of(s, i), current?(s, i) }]
+ */
+function renderCompareTable(table, series, spec) {
+  const compare = series.length > 1;
+  const head = table.tHead;
+  const body = table.tBodies[0];
+  head.replaceChildren();
+  body.replaceChildren();
+
+  const top = document.createElement("tr");
+  top.append(cellEl("th", spec.key.label, { scope: "col", rowspan: compare ? 2 : null }));
+  for (const col of spec.cols) {
+    top.append(
+      cellEl("th", col.label(series[0].result), {
+        class: "group-start",
+        scope: compare ? "colgroup" : "col",
+        colspan: compare ? series.length : null,
+      })
+    );
   }
-  tbody.append(tr);
+  head.append(top);
+
+  if (compare) {
+    // The setup letters, tinted to match each setup's colour on the charts.
+    const sub = document.createElement("tr");
+    for (const col of spec.cols) {
+      series.forEach((s, i) => {
+        sub.append(cellEl("th", s.label, { scope: "col", class: `sub sub-${s.key}${i === 0 ? " group-start" : ""}` }));
+      });
+    }
+    head.append(sub);
+  }
+
+  const rows = Math.max(...series.map(spec.rows));
+  for (let i = 0; i < rows; i++) {
+    const tr = document.createElement("tr");
+    tr.append(cellEl("th", spec.key.of(i), { scope: "row" }));
+
+    // With one setup the whole row is "the gear you are in". With two, each is in
+    // its own gear, so only the cells of the setup that is in this one light up.
+    if (!compare && spec.cols.some((c) => c.current?.(series[0], i))) tr.className = "is-current";
+
+    for (const col of spec.cols) {
+      series.forEach((s, n) => {
+        const value = col.of(s, i);
+        const classes = [
+          n === 0 ? "group-start" : "",
+          compare && col.current?.(s, i) ? "is-current" : "",
+        ];
+        tr.append(cellEl("td", value ?? "—", { class: classes.filter(Boolean).join(" ") || null }));
+      });
+    }
+    body.append(tr);
+  }
 }
 
-function renderTable(tbody, series) {
-  tbody.replaceChildren();
-  const compare = series.length > 1;
-  const rows = Math.max(...series.map((s) => s.result.curves.length));
-
-  // Grouped by gear rather than by setup: comparing A's 3rd against B's 3rd is
-  // the reason the table exists, and adjacent rows are what make that readable.
-  for (let i = 0; i < rows; i++) {
-    for (const s of series) {
-      const curve = s.result.curves[i];
-      if (!curve) continue;
-      const overall = curve.ratio * s.inputs.final_drive * s.inputs.transfer;
-      const cells = [String(curve.gear)];
-      if (compare) cells.push(s.label);
-      cells.push(curve.ratio.toFixed(3), overall.toFixed(3), curve.top_speed.toFixed(1));
-      addRow(tbody, cells, curve.gear === s.at.gear);
-    }
-  }
+function renderTable(table, series) {
+  renderCompareTable(table, series, {
+    key: { label: "Gear", of: (i) => String(i + 1) },
+    rows: (s) => s.result.curves.length,
+    cols: [
+      {
+        label: () => "Ratio",
+        of: (s, i) => s.result.curves[i]?.ratio.toFixed(3),
+        current: (s, i) => s.result.curves[i]?.gear === s.at.gear,
+      },
+      {
+        label: () => "Overall",
+        of: (s, i) => {
+          const curve = s.result.curves[i];
+          return curve && (curve.ratio * s.inputs.final_drive * s.inputs.transfer).toFixed(3);
+        },
+        current: (s, i) => s.result.curves[i]?.gear === s.at.gear,
+      },
+      {
+        label: (r) => `Top speed (${r.speed_unit})`,
+        of: (s, i) => s.result.curves[i]?.top_speed.toFixed(1),
+        current: (s, i) => s.result.curves[i]?.gear === s.at.gear,
+      },
+    ],
+  });
 }
 
 /** One row per upshift: where the engine lands in the next gear. */
-function renderShiftTable(tbody, series) {
-  tbody.replaceChildren();
-  const compare = series.length > 1;
-  const rows = Math.max(...series.map((s) => s.result.shifts.length));
-
-  for (let i = 0; i < rows; i++) {
-    for (const s of series) {
-      const shift = s.result.shifts[i];
-      if (!shift) continue;
-      const cells = [`${shift.from_gear} → ${shift.to_gear}`];
-      if (compare) cells.push(s.label);
-      cells.push(shift.speed.toFixed(1), shift.rpm_after.toFixed(1), String(Math.round(shift.rpm_drop)));
-      addRow(tbody, cells, false);
-    }
-  }
+function renderShiftTable(table, series) {
+  renderCompareTable(table, series, {
+    key: { label: "Shift", of: (i) => `${i + 1} → ${i + 2}` },
+    rows: (s) => s.result.shifts.length,
+    cols: [
+      { label: (r) => `Speed (${r.speed_unit})`, of: (s, i) => s.result.shifts[i]?.speed.toFixed(1) },
+      { label: () => "RPM after", of: (s, i) => s.result.shifts[i]?.rpm_after.toFixed(1) },
+      { label: () => "RPM drop", of: (s, i) => rounded(s.result.shifts[i]?.rpm_drop) },
+    ],
+  });
 }
 
-/** Optimal upshifts, from the tractive-effort crossovers rather than a fixed RPM. */
-function renderCrossTable(tbody, series) {
-  tbody.replaceChildren();
-  const compare = series.length > 1;
-  const rows = Math.max(...series.map((s) => s.result.crossovers.length));
+/** `Math.round` that survives the missing row of a setup with fewer gears. */
+const rounded = (v) => (v == null ? undefined : String(Math.round(v)));
 
-  for (let i = 0; i < rows; i++) {
-    for (const s of series) {
-      const cross = s.result.crossovers[i];
-      if (!cross) continue;
-      const cells = [`${cross.from_gear} → ${cross.to_gear}`];
-      if (compare) cells.push(s.label);
-      cells.push(
-        cross.speed.toFixed(1),
-        // A pair that never crosses is held to the limiter; say so rather than
-        // print the redline as though it were a computed optimum.
-        cross.at_redline ? `${Math.round(cross.rpm)} (redline)` : String(Math.round(cross.rpm)),
-        String(Math.round(cross.rpm_after)),
-        cross.force.toFixed(0)
-      );
-      addRow(tbody, cells, false);
-    }
-  }
+/** Optimal upshifts, from the tractive-effort crossovers rather than a fixed RPM. */
+function renderCrossTable(table, series) {
+  renderCompareTable(table, series, {
+    key: { label: "Shift", of: (i) => `${i + 1} → ${i + 2}` },
+    rows: (s) => s.result.crossovers.length,
+    cols: [
+      { label: (r) => `Speed (${r.speed_unit})`, of: (s, i) => s.result.crossovers[i]?.speed.toFixed(1) },
+      {
+        label: () => "Upshift at",
+        of: (s, i) => {
+          const cross = s.result.crossovers[i];
+          if (!cross) return undefined;
+          // A pair that never crosses is held to the limiter; say so rather than
+          // print the redline as though it were a computed optimum.
+          return cross.at_redline ? `${Math.round(cross.rpm)} (redline)` : String(Math.round(cross.rpm));
+        },
+      },
+      { label: () => "Lands at", of: (s, i) => rounded(s.result.crossovers[i]?.rpm_after) },
+      { label: (r) => `Force (${r.force_unit})`, of: (s, i) => s.result.crossovers[i]?.force.toFixed(0) },
+    ],
+  });
 }
 
 /* --------------------------------- inputs -------------------------------- */
@@ -894,11 +957,10 @@ function recompute() {
   slider.max = String(Math.floor(topSpeed()));
   if (parseFloat(slider.value) > topSpeed()) slider.value = slider.max;
 
+  // Table headers carry their own units, built from the result; this is the
+  // slider's label, which is not.
   document.querySelectorAll("[data-speed-unit]").forEach((el) => {
     el.textContent = results.a.speed_unit;
-  });
-  document.querySelectorAll("[data-force-unit]").forEach((el) => {
-    el.textContent = results.a.force_unit;
   });
 
   redraw();
@@ -970,8 +1032,8 @@ function redraw() {
 
   renderChart($("#chart"), series, speed);
   renderLegend($("#legend"), series);
-  renderTable($("#table tbody"), series);
-  renderShiftTable($("#shift-table tbody"), series);
+  renderTable($("#table"), series);
+  renderShiftTable($("#shift-table"), series);
 
   // A curve shorter than two points, or one that starts above the redline, leaves
   // Python with nothing to plot. Hide the whole section rather than draw an empty
@@ -983,7 +1045,7 @@ function redraw() {
     renderEffortLegend($("#effort-legend"), series);
     renderEngineChart($("#engine-chart"), series);
     renderPeaks($("#engine-peaks"), series);
-    renderCrossTable($("#cross-table tbody"), series);
+    renderCrossTable($("#cross-table"), series);
   }
 }
 
@@ -1009,7 +1071,6 @@ function onCompareChange() {
   $("#setup-tabs").hidden = !on;
   $("#gear_scope").hidden = !on;
   $(".gauges").toggleAttribute("data-compare", on);
-  document.querySelectorAll("[data-setup-col]").forEach((el) => (el.hidden = !on));
   $('.rpm-row[data-setup="b"]').hidden = !on;
   $('.rpm-row[data-setup="a"] .rpm-tag').hidden = !on;
 

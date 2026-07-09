@@ -132,18 +132,12 @@
             Equivalently: where the revs you drop to make as much power as the
             revs you are leaving.
           </p>
+          <!-- Head and body are both built by `renderCompareTable`: comparing splits
+               every value column into one sub-column per setup, so the header is two
+               rows deep and cannot be static. Column units come from the result. -->
           <div class="table-wrap">
             <table id="cross-table">
-              <thead>
-                <tr>
-                  <th>Shift</th>
-                  <th data-setup-col hidden>Setup</th>
-                  <th>Speed <span data-speed-unit>km/h</span></th>
-                  <th>Upshift at</th>
-                  <th>Lands at</th>
-                  <th>Force <span data-force-unit>N</span></th>
-                </tr>
-              </thead>
+              <thead></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -152,15 +146,7 @@
         <h3>Top speed per gear</h3>
         <div class="table-wrap">
           <table id="table">
-            <thead>
-              <tr>
-                <th>Gear</th>
-                <th data-setup-col hidden>Setup</th>
-                <th>Ratio</th>
-                <th>Overall</th>
-                <th>Top speed <span data-speed-unit>km/h</span></th>
-              </tr>
-            </thead>
+            <thead></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -168,15 +154,7 @@
         <h3>Shift points</h3>
         <div class="table-wrap">
           <table id="shift-table">
-            <thead>
-              <tr>
-                <th>Shift</th>
-                <th data-setup-col hidden>Setup</th>
-                <th>Speed <span data-speed-unit>km/h</span></th>
-                <th>RPM after</th>
-                <th>RPM drop</th>
-              </tr>
-            </thead>
+            <thead></thead>
             <tbody></tbody>
           </table>
         </div>

@@ -645,5 +645,30 @@ th {
   font-weight: 600;
 }
 
-tbody tr:last-child td { border-bottom: none; }
+/* Row headers are the gear or shift, not a heading: keep the body's weight. */
+tbody th {
+  font-weight: 400;
+  text-transform: none;
+  color: var(--text);
+}
+
+/* A group header spans its setups' sub-columns, so it centres over them. */
+thead th[colspan] { text-align: center; border-bottom: none; }
+
+/* The setup letters, tinted to match the traces on the charts. */
+thead th.sub { font-size: 0.7rem; letter-spacing: 0.08em; }
+thead th.sub-a { color: var(--dial-amber); }
+thead th.sub-b { color: var(--dial-blue); }
+
+/* Rules down the column-group boundaries, so the eye does not slide from A's
+   top speed into B's overall ratio. */
+.group-start:not(:first-child) { border-left: 1px solid var(--border); }
+
+tbody tr:last-child td,
+tbody tr:last-child th { border-bottom: none; }
+
+/* Which gear you are in. One row per gear now holds both setups, so comparing
+   highlights the cells of whichever setup is in that gear — each setup can be in
+   a different one. Without comparison the whole row lights up, as it always has. */
 tbody tr.is-current { background: var(--accent-soft); }
+tbody td.is-current { background: var(--accent-soft); }

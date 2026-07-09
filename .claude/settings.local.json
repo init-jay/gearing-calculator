@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /Users/jay/Documents/Repos/gearing-calculator/.devcontainer)"
+    ],
+    "additionalDirectories": [
+      "/Users/jay/Documents/Repos/gearing-calculator"
+    ]
+  }
+}

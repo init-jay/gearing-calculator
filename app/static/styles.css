@@ -22,6 +22,9 @@
   --dial-hub: #23262a;
   --dial-hub-edge: #40454b;
   --dial-amber: #f5a11d; /* classic BMW instrument backlighting */
+  /* Setup B, everywhere it appears: needle, redline, trace, tab, readout. One
+     fixed hue so the dial keeps its palette and the chart still matches it. */
+  --dial-blue: #3b9ae1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -211,6 +214,41 @@ fieldset.units label {
   font-size: 0.9rem;
 }
 
+/* -------------------------------- setups -------------------------------- */
+.compare-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs [role="tab"] {
+  flex: 1;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: -1px; /* the selected tab's underline replaces the tablist rule */
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+/* Each tab is underlined in its setup's color, tying the form to its trace. */
+.tabs [role="tab"][aria-selected="true"] { color: var(--text); }
+.tabs [data-setup="a"][aria-selected="true"] { border-bottom-color: var(--dial-amber); }
+.tabs [data-setup="b"][aria-selected="true"] { border-bottom-color: var(--dial-blue); }
+
 /* -------------------------------- gears --------------------------------- */
 .gears-header {
   display: flex;
@@ -280,9 +318,6 @@ fieldset.units label {
   border-radius: 6px;
 }
 
-/* The digits are tabular, so reserving five slots keeps the box — and hence the
-   `auto` grid track and the dials either side of it — a constant width as the
-   rpm climbs from 0 to five figures. */
 /* The readout is a fixed size but the dials scale with the panel, so past a point
    the wedge between them is too small to hold it and it drops below instead.
    Keyed off the container, not the viewport: the panel is narrower at 1024px
@@ -298,7 +333,27 @@ fieldset.units label {
   }
 }
 
-.rpm-readout output {
+/* Comparing adds a second row. The taller box does technically clear the dials at
+   the widest layout, but by ~3px — less than one font metric's worth — so it drops
+   below at every width rather than pretending to fit. */
+.gauges[data-compare] .rpm-readout {
+  position: static;
+  transform: none;
+  grid-row: 2;
+  grid-column: 1 / -1;
+  justify-self: center;
+  margin-top: 0.75rem;
+}
+
+.rpm-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+/* The digits are tabular, so reserving five slots keeps the box — and the dials
+   either side of it — a constant width as the rpm climbs from 0 to five figures. */
+.rpm-row output {
   min-width: 5ch;
   text-align: center;
   color: var(--dial-amber);
@@ -307,7 +362,21 @@ fieldset.units label {
   line-height: 1.1;
 }
 
-.rpm-readout span {
+.rpm-tag {
+  color: var(--dial-amber);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.rpm-row[data-setup="b"] output,
+.rpm-row[data-setup="b"] .rpm-tag { color: var(--dial-blue); }
+
+/* One slider drives both setups, so it can be pushed past a setup's own top
+   speed — which would need more rpm than that engine has. Say so. */
+.rpm-row[data-over] output { color: var(--dial-red); }
+
+.rpm-unit {
   color: var(--dial-ink-dim);
   font-size: 0.6rem;
   letter-spacing: 0.1em;
@@ -321,8 +390,12 @@ fieldset.units label {
 .gauge-bezel { fill: none; stroke: var(--dial-bezel); stroke-width: 2.5; }
 .gauge-tick-major { stroke: var(--dial-ink); stroke-width: 3.2; stroke-linecap: butt; }
 .gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1.8; }
-/* Stroke width spans the tick ring, so the arc reads as a band on the dial edge. */
-.gauge-redline { fill: none; stroke: var(--dial-red); stroke-width: 8; stroke-linecap: butt; }
+/* stroke-width is set per-arc in app.js: a lone band spans the tick ring's full
+   width, two share it. CSS would beat the presentation attribute, so it is
+   deliberately absent here. */
+.gauge-redline { fill: none; stroke: var(--dial-red); stroke-linecap: butt; }
+/* Setup B's band, inboard of A's and dimmed so A stays the one you read. */
+.gauge-redline-b { opacity: 0.55; }
 /* Numerals are sized to the widest label on the dial (see `numWidth` in app.js):
    a tach counting 0-7 can be big, a speedo counting to 300 cannot. */
 .gauge-tick-label {
@@ -336,6 +409,9 @@ fieldset.units label {
 .gauge[data-num-width="medium"] .gauge-tick-label { font-size: 14px; }
 .gauge[data-num-width="wide"] .gauge-tick-label { font-size: 12px; }
 .gauge-needle { fill: var(--dial-ink); }
+/* Setup B's needle, drawn under A's. A real cluster has one needle; the colour
+   is what tells you this one is the comparison rather than the instrument. */
+.gauge-needle-b { fill: var(--dial-blue); opacity: 0.9; }
 .gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
 .gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
 
@@ -397,6 +473,11 @@ fieldset.units label {
   stroke-linecap: round;
 }
 
+/* Setup B: a different hue *and* a dash, so the two runs stay distinguishable
+   where they overlap and without relying on colour alone. */
+.chart-trace-b { stroke: var(--dial-blue); stroke-dasharray: 7 5; }
+.chart-marker-b { fill: var(--dial-blue); }
+
 .chart-shift { fill: var(--text); opacity: 0.65; }
 
 .legend {
@@ -416,8 +497,10 @@ fieldset.units label {
   border-radius: 2px;
 }
 
-/* Mirrors .chart-trace's solid amber so the legend entry is recognisable. */
+/* Mirror the traces so each legend entry is recognisable. */
 .legend .swatch-trace { background: var(--dial-amber); }
+.legend .swatch-trace-b { background: var(--dial-blue); }
+.legend-note { font-style: italic; opacity: 0.8; }
 
 /* -------------------------------- table --------------------------------- */
 .table-wrap { overflow-x: auto; }

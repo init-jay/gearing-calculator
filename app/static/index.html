@@ -28,6 +28,8 @@
       <section class="panel" aria-labelledby="inputs-heading">
         <h2 id="inputs-heading">Inputs</h2>
 
+        <!-- Outside the setups: comparing km/h against mph on one chart is
+             meaningless, so both setups always share a unit system. -->
         <fieldset class="units">
           <legend>Units</legend>
           <label>
@@ -40,59 +42,24 @@
           </label>
         </fieldset>
 
-        <div class="field">
-          <label for="tire_width">Tire size</label>
-          <div class="tire-size">
-            <input type="number" id="tire_width" value="225" min="100" step="5"
-                   aria-label="Section width in mm" />
-            <span aria-hidden="true">/</span>
-            <input type="number" id="tire_aspect" value="45" min="10" step="5"
-                   aria-label="Aspect ratio (percent)" />
-            <span aria-hidden="true">R</span>
-            <input type="number" id="tire_wheel" value="17" min="8" step="1"
-                   aria-label="Wheel diameter in inches" />
-          </div>
+        <label class="compare-toggle">
+          <input type="checkbox" id="compare" />
+          <span>Compare two setups</span>
+        </label>
+
+        <div class="tabs" id="setup-tabs" role="tablist" aria-label="Setup" hidden>
+          <button type="button" role="tab" id="tab-a" data-setup="a"
+                  aria-controls="setup-a" aria-selected="true">Setup A</button>
+          <button type="button" role="tab" id="tab-b" data-setup="b"
+                  aria-controls="setup-b" aria-selected="false">Setup B</button>
         </div>
 
-        <div class="field">
-          <label for="tire">Tire diameter <span class="unit" data-tire-unit>mm</span></label>
-          <input type="number" id="tire" value="634.3" readonly />
-        </div>
-
-        <div class="field">
-          <label for="final_drive">Final drive (diff) ratio</label>
-          <input type="number" id="final_drive" value="3.64" min="0.01" step="0.01" />
-        </div>
-
-        <div class="field">
-          <label for="transfer">Transfer case ratio</label>
-          <input type="number" id="transfer" value="1.0" min="0.01" step="0.01" />
-        </div>
-
-        <div class="field">
-          <label for="slip">Converter slip <span class="unit">%</span></label>
-          <input type="number" id="slip" value="0" min="0" max="99" step="0.5" />
-        </div>
-
-        <div class="field">
-          <label for="max_rpm">Max RPM (redline)</label>
-          <input type="number" id="max_rpm" value="7000" min="500" step="100" />
-        </div>
-
-        <div class="field">
-          <label for="shift_rpm">Shift at RPM</label>
-          <input type="number" id="shift_rpm" value="7000" min="500" step="100" />
-        </div>
-
-        <div class="gears">
-          <div class="gears-header">
-            <h3>Transmission gears</h3>
-            <div class="gear-buttons">
-              <button type="button" id="remove-gear" title="Remove last gear">−</button>
-              <button type="button" id="add-gear" title="Add a gear">+</button>
-            </div>
-          </div>
-          <div id="gear-list"></div>
+        <!-- Both panels are filled from #setup-template at boot. -->
+        <div id="setups">
+          <div class="setup" id="setup-a" data-setup="a" role="tabpanel"
+               aria-labelledby="tab-a"></div>
+          <div class="setup" id="setup-b" data-setup="b" role="tabpanel"
+               aria-labelledby="tab-b" hidden></div>
         </div>
       </section>
 
@@ -105,8 +72,15 @@
                aria-label="Speedometer"></svg>
           <!-- Sits where the cluster puts its warning lights, between the dials. -->
           <div class="rpm-readout">
-            <output id="rpm_out" for="cur_speed">0</output>
-            <span>rpm</span>
+            <div class="rpm-row" data-setup="a">
+              <span class="rpm-tag" hidden>A</span>
+              <output id="rpm_out" for="cur_speed">0</output>
+            </div>
+            <div class="rpm-row" data-setup="b" hidden>
+              <span class="rpm-tag">B</span>
+              <output id="rpm_out_b" for="cur_speed">0</output>
+            </div>
+            <span class="rpm-unit">rpm</span>
           </div>
           <svg id="tach" class="gauge" viewBox="0 0 200 200" role="img"
                aria-label="Tachometer"></svg>
@@ -121,7 +95,7 @@
             <input type="range" id="cur_speed" min="0" max="277" step="1" value="100" />
           </div>
           <div class="field">
-            <label for="cur_gear">Gear</label>
+            <label for="cur_gear">Gear <span class="unit" id="gear_scope" hidden>A / B</span></label>
             <output id="cur_gear" class="gear-readout">1</output>
           </div>
         </div>
@@ -137,6 +111,7 @@
             <thead>
               <tr>
                 <th>Gear</th>
+                <th data-setup-col hidden>Setup</th>
                 <th>Ratio</th>
                 <th>Overall</th>
                 <th>Top speed <span data-speed-unit>km/h</span></th>
@@ -152,6 +127,7 @@
             <thead>
               <tr>
                 <th>Shift</th>
+                <th data-setup-col hidden>Setup</th>
                 <th>Speed <span data-speed-unit>km/h</span></th>
                 <th>RPM after</th>
                 <th>RPM drop</th>
@@ -163,6 +139,68 @@
       </section>
     </div>
   </main>
+
+  <!-- Cloned once per setup. Ids are rewritten with the setup key on clone, so
+       each form's labels stay wired to their own inputs; JS finds fields by
+       `data-field` within a setup root and never by a global id. -->
+  <template id="setup-template">
+    <div class="field">
+      <label for="tire_width">Tire size</label>
+      <div class="tire-size">
+        <input type="number" id="tire_width" data-field="tire_width" value="225"
+               min="100" step="5" aria-label="Section width in mm" />
+        <span aria-hidden="true">/</span>
+        <input type="number" id="tire_aspect" data-field="tire_aspect" value="45"
+               min="10" step="5" aria-label="Aspect ratio (percent)" />
+        <span aria-hidden="true">R</span>
+        <input type="number" id="tire_wheel" data-field="tire_wheel" value="17"
+               min="8" step="1" aria-label="Wheel diameter in inches" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="tire">Tire diameter <span class="unit" data-tire-unit>mm</span></label>
+      <input type="number" id="tire" data-field="tire" value="634.3" readonly />
+    </div>
+
+    <div class="field">
+      <label for="final_drive">Final drive (diff) ratio</label>
+      <input type="number" id="final_drive" data-field="final_drive" value="3.64"
+             min="0.01" step="0.01" />
+    </div>
+
+    <div class="field">
+      <label for="transfer">Transfer case ratio</label>
+      <input type="number" id="transfer" data-field="transfer" value="1.0"
+             min="0.01" step="0.01" />
+    </div>
+
+    <div class="field">
+      <label for="slip">Converter slip <span class="unit">%</span></label>
+      <input type="number" id="slip" data-field="slip" value="0" min="0" max="99" step="0.5" />
+    </div>
+
+    <div class="field">
+      <label for="max_rpm">Max RPM (redline)</label>
+      <input type="number" id="max_rpm" data-field="max_rpm" value="7000" min="500" step="100" />
+    </div>
+
+    <div class="field">
+      <label for="shift_rpm">Shift at RPM</label>
+      <input type="number" id="shift_rpm" data-field="shift_rpm" value="7000" min="500" step="100" />
+    </div>
+
+    <div class="gears">
+      <div class="gears-header">
+        <h3>Transmission gears</h3>
+        <div class="gear-buttons">
+          <button type="button" data-remove-gear title="Remove last gear">−</button>
+          <button type="button" data-add-gear title="Add a gear">+</button>
+        </div>
+      </div>
+      <div data-gear-list></div>
+    </div>
+  </template>
 
   <script src="app.js"></script>
 </body>

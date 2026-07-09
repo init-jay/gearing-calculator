@@ -3,11 +3,17 @@
  *
  * All drivetrain math lives in calc.py and runs in the browser under Pyodide;
  * this file only gathers inputs, calls into Python, and draws SVG.
+ *
+ * Two drivetrains can be entered at once. Setup A is the reference; setup B
+ * exists only while comparison is on. Everything downstream — gauges, chart,
+ * tables — takes a list of setups, which is one entry long in the normal case.
  */
 
 const DEFAULT_GEARS = [5.14, 2.83, 1.79, 1.26, 1.0, 0.83];
 const MAX_GEARS = 8;
 const MIN_GEARS = 1;
+
+const SETUP_KEYS = ["a", "b"];
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -15,7 +21,18 @@ let pyodide = null;
 let pyCompute = null;
 let pyAtSpeed = null;
 let pyTireDiameter = null;
-let lastResult = null;
+
+/** Latest Python result per active setup key, e.g. `{a: {...}, b: {...}}`. */
+let results = {};
+/** Setup B is seeded from A the first time comparison is switched on. */
+let seededB = false;
+
+const comparing = () => $("#compare").checked;
+const activeKeys = () => (comparing() ? SETUP_KEYS : ["a"]);
+const setupRoot = (key) => $(`#setup-${key}`);
+
+/** Top speed of the fastest active setup — the speed slider's ceiling. */
+const topSpeed = () => Math.max(0, ...Object.values(results).map((r) => r.max_speed));
 
 /* ------------------------------- geometry -------------------------------- */
 
@@ -88,11 +105,18 @@ const R_FACE = 95;
 const R_TICK = 88; // outer edge of the tick ring; ticks grow inward from here
 const R_MAJOR_IN = 76;
 const R_MINOR_IN = 81;
-const R_RED = 84; // centreline of the redline arc, spanning the tick ring's width
 const R_LABEL = 62;
 const R_NEEDLE = 70;
 const R_HUB = 13;
 const NEEDLE_TAIL = 9; // counterweight stub, kept shorter than the hub that hides it
+
+// Where the redline arc(s) sit. A lone band fills the tick ring's width; two
+// stack concentrically, the reference setup outside, so neither hides the other.
+const RED_SINGLE = [{ r: 84, w: 8 }];
+const RED_DOUBLE = [
+  { r: 85.75, w: 4.5 },
+  { r: 79.5, w: 4.5 },
+];
 
 /** A radial line from `r1` out to `r2` at `angle`. */
 function spoke(cls, cx, cy, r1, r2, angle) {
@@ -101,19 +125,38 @@ function spoke(cls, cx, cy, r1, r2, angle) {
   return svgEl("line", { class: cls, x1, y1, x2, y2 });
 }
 
+/** Tapered needle: narrow at the tip, wide across the tail. */
+function needlePolygon(cls, cx, cy, angleDeg) {
+  // `u` runs along the needle, `p` across it.
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  const [ux, uy] = [Math.cos(rad), Math.sin(rad)];
+  const [px, py] = [-uy, ux];
+  const pt = (along, across) =>
+    `${cx + along * ux + across * px},${cy + along * uy + across * py}`;
+  return svgEl("polygon", {
+    class: cls,
+    points: [
+      pt(R_NEEDLE, 1.0),
+      pt(R_NEEDLE, -1.0),
+      pt(-NEEDLE_TAIL, -3.6),
+      pt(-NEEDLE_TAIL, 3.6),
+    ].join(" "),
+  });
+}
+
 /**
- * Draw a round instrument dial: dark face, tick ring, numerals, tapered needle,
+ * Draw a round instrument dial: dark face, tick ring, numerals, tapered needles,
  * and `legend` printed below the hub. Like the real cluster it carries no digital
  * readout; the live rpm is shown between the dials instead.
- * `redlineAt` (a value, optional) marks the band from there to `max` in red.
+ *
+ * `needles` are drawn back-to-front, so `needles[0]` — the reference setup — ends
+ * up on top. Each `bands` entry is a `{from, to}` span of dial values painted red.
  */
-function renderGauge(svg, { value, max, step, legend, redlineAt = null }) {
+function renderGauge(svg, { max, step, legend, needles, bands = [] }) {
   const cx = 100;
   const cy = 100;
-  const clamped = Math.max(0, Math.min(value, max));
   const angleFor = (v) => GAUGE_START + (max > 0 ? v / max : 0) * GAUGE_SWEEP;
-  const valueAngle = angleFor(clamped);
-  const inRedline = (v) => redlineAt !== null && v >= redlineAt;
+  const inRedline = (v) => bands.some((b) => v > b.from && v < b.to);
 
   svg.replaceChildren();
 
@@ -152,44 +195,40 @@ function renderGauge(svg, { value, max, step, legend, redlineAt = null }) {
       const [lx, ly] = polar(cx, cy, R_LABEL, angle);
       svg.append(svgEl("text", { class: "gauge-tick-label", x: lx, y: ly }, labels[i / MINOR_PER_MAJOR]));
     } else if (!inRedline(v)) {
-      // Minor ticks would collide with the red bars, so the band gets only bars.
+      // Minor ticks would collide with the red band, so the band gets only red.
       svg.append(spoke("gauge-tick-minor", cx, cy, R_MINOR_IN, R_TICK, angle));
     }
   }
 
-  // One unbroken arc, inset at both ends so it sits between the major ticks
-  // bounding the band rather than on top of them.
-  if (redlineAt !== null && redlineAt < max) {
-    const from = angleFor(redlineAt) + REDLINE_INSET_DEG;
-    const to = angleFor(max) - REDLINE_INSET_DEG;
-    if (to > from) {
-      svg.append(svgEl("path", { class: "gauge-redline", d: arcPath(cx, cy, R_RED, from, to) }));
-    }
-  }
+  // Unbroken arcs, inset at both ends so each sits between the major ticks
+  // bounding it rather than on top of them.
+  const geom = bands.length > 1 ? RED_DOUBLE : RED_SINGLE;
+  bands.forEach((band, i) => {
+    if (band.from >= max) return;
+    const from = angleFor(band.from) + REDLINE_INSET_DEG;
+    const to = angleFor(Math.min(band.to, max)) - REDLINE_INSET_DEG;
+    if (to <= from) return;
+    const { r, w } = geom[Math.min(i, geom.length - 1)];
+    svg.append(
+      svgEl("path", {
+        class: i === 0 ? "gauge-redline" : "gauge-redline gauge-redline-b",
+        // An attribute, not CSS: the width depends on how many bands there are.
+        "stroke-width": w,
+        d: arcPath(cx, cy, r, from, to),
+      })
+    );
+  });
 
   legend.forEach((line, i) => {
     svg.append(svgEl("text", { class: "gauge-legend", x: cx, y: cy + 30 + i * 11 }, line));
   });
 
-  // Tapered needle: narrow at the tip, wide across the tail. `u` runs along the
-  // needle, `p` across it.
-  const rad = ((valueAngle - 90) * Math.PI) / 180;
-  const [ux, uy] = [Math.cos(rad), Math.sin(rad)];
-  const [px, py] = [-uy, ux];
-  const pt = (along, across) => `${cx + along * ux + across * px},${cy + along * uy + across * py}`;
-  svg.append(
-    svgEl("polygon", {
-      class: "gauge-needle",
-      points: [
-        pt(R_NEEDLE, 1.0),
-        pt(R_NEEDLE, -1.0),
-        pt(-NEEDLE_TAIL, -3.6),
-        pt(-NEEDLE_TAIL, 3.6),
-      ].join(" "),
-    })
-  );
+  [...needles].reverse().forEach(({ value, cls }) => {
+    const clamped = Math.max(0, Math.min(value, max));
+    svg.append(needlePolygon(cls, cx, cy, angleFor(clamped)));
+  });
 
-  // Drawn after the needle so its base disappears beneath the hub cap.
+  // Drawn after the needles so their bases disappear beneath the hub cap.
   svg.append(svgEl("circle", { class: "gauge-hub", cx, cy, r: R_HUB }));
 }
 
@@ -205,7 +244,15 @@ function niceStep(x) {
   return nice * base;
 }
 
-function renderChart(svg, result, current) {
+/**
+ * Plot every setup's acceleration run against road speed.
+ *
+ * With one setup the gear curves are drawn behind the trace as context. With two
+ * there would be a dozen of them, and the comparison — how the two runs differ —
+ * is carried entirely by the traces, so the curves are dropped.
+ */
+function renderChart(svg, series, speed) {
+  const compare = series.length > 1;
   const W = 640;
   const H = 360;
   // Every gear curve tops out at max RPM, so the top margin has to clear the
@@ -215,9 +262,10 @@ function renderChart(svg, result, current) {
   const plotH = H - M.top - M.bottom;
 
   // Road speed runs along X because it increases monotonically through a run,
-  // so the shift trace reads left-to-right as a sawtooth.
-  const xMax = result.max_speed * 1.05 || 1;
-  const yMax = result.max_rpm;
+  // so the shift trace reads left-to-right as a sawtooth. Both axes span the
+  // union of the setups, so the two runs share one frame of reference.
+  const xMax = Math.max(...series.map((s) => s.result.max_speed)) * 1.05 || 1;
+  const yMax = Math.max(...series.map((s) => s.result.max_rpm));
 
   const xPix = (spd) => M.left + (spd / xMax) * plotW;
   const yPix = (rpm) => M.top + plotH - (rpm / yMax) * plotH;
@@ -252,7 +300,7 @@ function renderChart(svg, result, current) {
   );
   svg.append(
     svgEl("text", { class: "chart-axis-title", x: M.left + plotW / 2, y: H - 6, "text-anchor": "middle" },
-      `Speed (${result.speed_unit})`)
+      `Speed (${series[0].result.speed_unit})`)
   );
   svg.append(
     svgEl("text", {
@@ -263,131 +311,170 @@ function renderChart(svg, result, current) {
 
   // One polyline per gear. They share a color, so each is named where it ends —
   // at max RPM, spread along the top edge by the gear's top speed.
-  result.curves.forEach((curve) => {
-    const pts = curve.samples.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
-    svg.append(svgEl("polyline", { class: "chart-line", points: pts }));
-    svg.append(
-      svgEl("text", {
-        class: "chart-gear-label", x: xPix(curve.top_speed), y: M.top - 6, "text-anchor": "middle",
-      }, String(curve.gear))
-    );
-  });
-
-  // The acceleration run: up each gear to the shift RPM, then straight down to
-  // the next gear at the same road speed. Drawn over the curves it annotates.
-  if (result.trace.length) {
-    const pts = result.trace.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
-    svg.append(svgEl("polyline", { class: "chart-trace", points: pts }));
-    result.shifts.forEach((s) => {
+  if (!compare) {
+    series[0].result.curves.forEach((curve) => {
+      const pts = curve.samples.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
+      svg.append(svgEl("polyline", { class: "chart-line", points: pts }));
       svg.append(
-        svgEl("circle", { class: "chart-shift", cx: xPix(s.speed), cy: yPix(result.shift_rpm), r: 3 })
+        svgEl("text", {
+          class: "chart-gear-label", x: xPix(curve.top_speed), y: M.top - 6, "text-anchor": "middle",
+        }, String(curve.gear))
       );
     });
   }
 
+  // The acceleration run: up each gear to the shift RPM, then straight down to
+  // the next gear at the same road speed.
+  series.forEach((s) => {
+    if (!s.result.trace.length) return;
+    const pts = s.result.trace.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
+    svg.append(svgEl("polyline", { class: `chart-trace chart-trace-${s.key}`, points: pts }));
+    s.result.shifts.forEach((shift) => {
+      svg.append(
+        svgEl("circle", {
+          class: "chart-shift", cx: xPix(shift.speed), cy: yPix(s.result.shift_rpm), r: 3,
+        })
+      );
+    });
+  });
+
   // Marker for the current speed, in whichever gear the shift schedule puts it.
-  if (current && current.speed >= 0 && current.speed <= xMax) {
+  // A setup that cannot reach this speed would need more rpm than it has, which
+  // puts its marker off the top of the plot; it is dropped rather than clamped.
+  series.forEach((s) => {
+    if (speed < 0 || speed > xMax || s.at.rpm > yMax) return;
     svg.append(
-      svgEl("circle", { class: "chart-marker", cx: xPix(current.speed), cy: yPix(current.rpm), r: 4 })
+      svgEl("circle", {
+        class: `chart-marker chart-marker-${s.key}`, cx: xPix(speed), cy: yPix(s.at.rpm), r: 4,
+      })
     );
-  }
+  });
 }
 
-/** The gear curves are named on the plot itself, so only the trace needs a key. */
-function renderLegend(el, result) {
+/** The gear curves are named on the plot itself, so only the traces need a key. */
+function renderLegend(el, series) {
   el.replaceChildren();
+  const compare = series.length > 1;
 
-  if (result.shifts.length) {
+  series.forEach((s) => {
+    if (!s.result.shifts.length) return;
     const span = document.createElement("span");
     const sw = document.createElement("i");
-    sw.className = "swatch swatch-trace";
-    span.append(sw, document.createTextNode(`Shift trace (@ ${Math.round(result.shift_rpm)} rpm)`));
+    sw.className = `swatch swatch-trace swatch-trace-${s.key}`;
+    const name = compare ? `Setup ${s.label} trace` : "Shift trace";
+    span.append(sw, document.createTextNode(`${name} (@ ${Math.round(s.result.shift_rpm)} rpm)`));
     el.append(span);
+  });
+
+  if (compare) {
+    const note = document.createElement("span");
+    note.className = "legend-note";
+    note.textContent = "Gear curves hidden while comparing";
+    el.append(note);
   }
 }
 
 /* --------------------------------- table --------------------------------- */
 
-function renderTable(tbody, result, inputs, currentGear) {
+/** Append a `<tr>` of text cells, interleaving setups so like rows sit adjacent. */
+function addRow(tbody, cells, current) {
+  const tr = document.createElement("tr");
+  if (current) tr.className = "is-current";
+  for (const text of cells) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    tr.append(td);
+  }
+  tbody.append(tr);
+}
+
+function renderTable(tbody, series) {
   tbody.replaceChildren();
-  result.curves.forEach((curve) => {
-    const overall = curve.ratio * inputs.final_drive * inputs.transfer;
-    const tr = document.createElement("tr");
-    if (curve.gear === currentGear) tr.className = "is-current";
-    for (const text of [
-      String(curve.gear),
-      curve.ratio.toFixed(3),
-      overall.toFixed(3),
-      curve.top_speed.toFixed(1),
-    ]) {
-      const td = document.createElement("td");
-      td.textContent = text;
-      tr.append(td);
+  const compare = series.length > 1;
+  const rows = Math.max(...series.map((s) => s.result.curves.length));
+
+  // Grouped by gear rather than by setup: comparing A's 3rd against B's 3rd is
+  // the reason the table exists, and adjacent rows are what make that readable.
+  for (let i = 0; i < rows; i++) {
+    for (const s of series) {
+      const curve = s.result.curves[i];
+      if (!curve) continue;
+      const overall = curve.ratio * s.inputs.final_drive * s.inputs.transfer;
+      const cells = [String(curve.gear)];
+      if (compare) cells.push(s.label);
+      cells.push(curve.ratio.toFixed(3), overall.toFixed(3), curve.top_speed.toFixed(1));
+      addRow(tbody, cells, curve.gear === s.at.gear);
     }
-    tbody.append(tr);
-  });
+  }
 }
 
 /** One row per upshift: where the engine lands in the next gear. */
-function renderShiftTable(tbody, result) {
+function renderShiftTable(tbody, series) {
   tbody.replaceChildren();
-  result.shifts.forEach((s) => {
-    const tr = document.createElement("tr");
-    for (const text of [
-      `${s.from_gear} → ${s.to_gear}`,
-      s.speed.toFixed(1),
-      s.rpm_after.toFixed(1),
-      String(Math.round(s.rpm_drop)),
-    ]) {
-      const td = document.createElement("td");
-      td.textContent = text;
-      tr.append(td);
+  const compare = series.length > 1;
+  const rows = Math.max(...series.map((s) => s.result.shifts.length));
+
+  for (let i = 0; i < rows; i++) {
+    for (const s of series) {
+      const shift = s.result.shifts[i];
+      if (!shift) continue;
+      const cells = [`${shift.from_gear} → ${shift.to_gear}`];
+      if (compare) cells.push(s.label);
+      cells.push(shift.speed.toFixed(1), shift.rpm_after.toFixed(1), String(Math.round(shift.rpm_drop)));
+      addRow(tbody, cells, false);
     }
-    tbody.append(tr);
-  });
+  }
 }
 
 /* --------------------------------- inputs -------------------------------- */
 
-function gearInputs() {
-  return [...document.querySelectorAll(".gear-input")];
-}
+const field = (root, name) => root.querySelector(`[data-field="${name}"]`);
+const gearInputs = (root) => [...root.querySelectorAll(".gear-input")];
 
 const currentUnits = () => document.querySelector('input[name="units"]:checked').value;
 
-const num = (id, fallback) => {
-  const v = parseFloat($(id).value);
+const num = (root, name, fallback) => {
+  const v = parseFloat(field(root, name).value);
   return Number.isFinite(v) ? v : fallback;
 };
 
-/**
- * Derive the tire diameter from the 225/45R17-style size inputs and write it
- * into the read-only `#tire` field, in whichever unit is currently selected.
- * Must run before `readInputs`, which treats `#tire` as the source of truth.
- */
-function updateTireDiameter() {
-  const units = currentUnits();
-  const dia = pyTireDiameter(
-    num("#tire_width", 225), num("#tire_aspect", 45), num("#tire_wheel", 17), units
-  );
-  $("#tire").value = dia.toFixed(units === "metric" ? 1 : 2);
+/** Fill a setup panel from the shared form template, namespacing its ids. */
+function buildSetupForm(key) {
+  const frag = $("#setup-template").content.cloneNode(true);
+  const labels = [...frag.querySelectorAll("label[for]")];
+  frag.querySelectorAll("[id]").forEach((el) => (el.id = `${key}-${el.id}`));
+  labels.forEach((el) => (el.htmlFor = `${key}-${el.htmlFor}`));
+  setupRoot(key).append(frag);
 }
 
-function readInputs() {
+/**
+ * Derive the tire diameter from the 225/45R17-style size inputs and write it
+ * into the read-only `tire` field, in whichever unit is currently selected.
+ * Must run before `readInputs`, which treats `tire` as the source of truth.
+ */
+function updateTireDiameter(root) {
+  const units = currentUnits();
+  const dia = pyTireDiameter(
+    num(root, "tire_width", 225), num(root, "tire_aspect", 45), num(root, "tire_wheel", 17), units
+  );
+  field(root, "tire").value = dia.toFixed(units === "metric" ? 1 : 2);
+}
+
+function readInputs(root) {
   return {
-    gears: gearInputs().map((el) => parseFloat(el.value)).filter((v) => Number.isFinite(v) && v > 0),
-    final_drive: num("#final_drive", 3.64),
-    transfer: num("#transfer", 1.0),
-    tire: num("#tire", 634.3),
-    slip: num("#slip", 0) / 100,
-    max_rpm: num("#max_rpm", 7000),
-    shift_rpm: num("#shift_rpm", 7000),
+    gears: gearInputs(root).map((el) => parseFloat(el.value)).filter((v) => Number.isFinite(v) && v > 0),
+    final_drive: num(root, "final_drive", 3.64),
+    transfer: num(root, "transfer", 1.0),
+    tire: num(root, "tire", 634.3),
+    slip: num(root, "slip", 0) / 100,
+    max_rpm: num(root, "max_rpm", 7000),
+    shift_rpm: num(root, "shift_rpm", 7000),
     units: currentUnits(),
   };
 }
 
-function buildGearRows(ratios) {
-  const list = $("#gear-list");
+function buildGearRows(root, ratios) {
+  const list = root.querySelector("[data-gear-list]");
   list.replaceChildren();
   ratios.forEach((ratio, i) => {
     const row = document.createElement("div");
@@ -407,162 +494,243 @@ function buildGearRows(ratios) {
     row.append(label, input);
     list.append(row);
   });
-  syncGearButtons();
+  syncGearButtons(root);
 }
 
-function syncGearButtons() {
-  const n = gearInputs().length;
-  $("#add-gear").disabled = n >= MAX_GEARS;
-  $("#remove-gear").disabled = n <= MIN_GEARS;
+function syncGearButtons(root) {
+  const n = gearInputs(root).length;
+  root.querySelector("[data-add-gear]").disabled = n >= MAX_GEARS;
+  root.querySelector("[data-remove-gear]").disabled = n <= MIN_GEARS;
+}
+
+/** Seed one setup from another, so comparison starts from a single changed field. */
+function copySetup(from, to) {
+  const src = setupRoot(from);
+  const dst = setupRoot(to);
+  buildGearRows(dst, gearInputs(src).map((el) => parseFloat(el.value) || 1));
+  src.querySelectorAll("[data-field]").forEach((el) => {
+    field(dst, el.dataset.field).value = el.value;
+  });
 }
 
 /* ------------------------------ python bridge ---------------------------- */
 
-/** Recompute all gear curves via Python, then redraw everything. */
-function recompute() {
-  updateTireDiameter();
-  const inputs = readInputs();
-  if (inputs.gears.length === 0) return;
-
-  // Advertise the ceiling, but don't rewrite the value here: `recompute` runs on
-  // every keystroke, and a half-typed redline ("8" of "8000") would clobber it.
-  // Python clamps the shift RPM to the redline anyway, so the math stays right;
-  // `onShiftRpmCommit` tidies the field once the user is done typing.
-  $("#shift_rpm").max = String(inputs.max_rpm);
-
+/** Call a Python function with a JS object argument, converting both ways. */
+function callPy(fn, inputs, ...rest) {
   const pyIn = pyodide.toPy(inputs);
   let proxy;
   try {
-    proxy = pyCompute(pyIn);
-    lastResult = proxy.toJs({ dict_converter: Object.fromEntries });
+    proxy = fn(pyIn, ...rest);
+    return proxy.toJs({ dict_converter: Object.fromEntries });
   } finally {
     pyIn.destroy();
     if (proxy) proxy.destroy();
   }
+}
 
-  // The speed slider's ceiling is the top gear's top speed, so it can only be
-  // set once `lastResult` is fresh. `floor` keeps the slider inside the plot.
+/** Recompute every active setup's gear curves via Python, then redraw. */
+function recompute() {
+  const next = {};
+  for (const key of activeKeys()) {
+    const root = setupRoot(key);
+    updateTireDiameter(root);
+    const inputs = readInputs(root);
+    if (inputs.gears.length === 0) return; // mid-edit; keep the last good result
+
+    // Advertise the ceiling, but don't rewrite the value here: `recompute` runs on
+    // every keystroke, and a half-typed redline ("8" of "8000") would clobber it.
+    // Python clamps the shift RPM to the redline anyway, so the math stays right;
+    // `onShiftRpmCommit` tidies the field once the user is done typing.
+    field(root, "shift_rpm").max = String(inputs.max_rpm);
+
+    next[key] = callPy(pyCompute, inputs);
+  }
+  results = next;
+
+  // The speed slider's ceiling is the fastest setup's top speed, so both runs are
+  // reachable on one slider. `floor` keeps the slider inside the plot.
   const slider = $("#cur_speed");
-  slider.max = String(Math.floor(lastResult.max_speed));
-  if (parseFloat(slider.value) > lastResult.max_speed) slider.value = slider.max;
+  slider.max = String(Math.floor(topSpeed()));
+  if (parseFloat(slider.value) > topSpeed()) slider.value = slider.max;
 
   document.querySelectorAll("[data-speed-unit]").forEach((el) => {
-    el.textContent = lastResult.speed_unit;
+    el.textContent = results.a.speed_unit;
   });
 
   redraw();
 }
 
-/** Redraw gauges/chart/table from `lastResult` + the current road speed. */
+/** The per-setup bundle every renderer takes: inputs, Python result, current state. */
+function buildSeries(speed) {
+  const series = [];
+  for (const key of activeKeys()) {
+    if (!results[key]) return null;
+    const inputs = readInputs(setupRoot(key));
+    if (inputs.gears.length === 0) return null;
+    series.push({
+      key,
+      label: key.toUpperCase(),
+      inputs,
+      result: results[key],
+      // Python decides which gear the shift schedule puts us in, and the rpm that
+      // gear needs to hold this speed — so the marker always lands on the trace.
+      at: callPy(pyAtSpeed, inputs, speed),
+    });
+  }
+  return series;
+}
+
+/** Redraw gauges/chart/tables from `results` + the current road speed. */
 function redraw() {
-  if (!lastResult) return;
-  const inputs = readInputs();
-  if (inputs.gears.length === 0) return;
-
   const speed = parseFloat($("#cur_speed").value);
-  $("#cur_speed_out").textContent = String(Math.round(speed));
+  const series = buildSeries(speed);
+  if (!series) return;
 
-  // Python decides which gear the shift schedule puts us in, and the rpm that
-  // gear needs to hold this speed — so the marker always lands on the trace.
-  const pyIn = pyodide.toPy(inputs);
-  let proxy, at;
-  try {
-    proxy = pyAtSpeed(pyIn, speed);
-    at = proxy.toJs({ dict_converter: Object.fromEntries });
-  } finally {
-    pyIn.destroy();
-    if (proxy) proxy.destroy();
+  const compare = series.length > 1;
+  $("#cur_speed_out").textContent = String(Math.round(speed));
+  $("#cur_gear").textContent = series.map((s) => s.at.gear).join(" / ");
+
+  // The dial spans the highest redline of the two, and each setup's red band is
+  // the last major segment of its own (rounded-up) redline — so equal redlines
+  // collapse to a single arc and only a real difference draws a second one.
+  const tach = rpmScale(Math.max(...series.map((s) => s.inputs.max_rpm)));
+  const bands = [];
+  for (const s of series) {
+    const to = Math.ceil(s.inputs.max_rpm / tach.step) * tach.step;
+    if (!bands.some((b) => b.to === to)) bands.push({ from: to - tach.step, to });
   }
 
-  const gearNum = at.gear;
-  const rpm = at.rpm;
-  $("#cur_gear").textContent = String(gearNum);
-
-  const tach = rpmScale(inputs.max_rpm);
   renderGauge($("#tach"), {
-    value: rpm, ...tach,
+    ...tach,
     legend: tach.max >= 1000 ? ["1/min", "×1000"] : ["1/min"],
-    redlineAt: tach.max - tach.step, // the last major segment, i.e. the top 1000 rpm
+    needles: series.map((s) => ({ value: s.at.rpm, cls: `gauge-needle gauge-needle-${s.key}` })),
+    bands,
   });
 
-  const speedScale = gaugeScale(Math.max(lastResult.max_speed, 1));
+  // Road speed is shared, so the speedometer carries a single needle whatever the
+  // comparison; only its scale grows to cover the faster setup.
+  const speedScale = gaugeScale(Math.max(1, ...series.map((s) => s.result.max_speed)));
   renderGauge($("#speedo"), {
-    value: speed, ...speedScale, legend: [lastResult.speed_unit],
+    ...speedScale,
+    legend: [series[0].result.speed_unit],
+    needles: [{ value: speed, cls: "gauge-needle gauge-needle-a" }],
   });
 
-  $("#rpm_out").textContent = String(Math.round(rpm));
+  for (const s of series) {
+    const row = $(`.rpm-row[data-setup="${s.key}"]`);
+    row.querySelector("output").textContent = String(Math.round(s.at.rpm));
+    // Either setup can be asked for a speed it cannot reach, which needs more rpm
+    // than it has. Flag that rather than hide it — the needle merely pegs.
+    row.toggleAttribute("data-over", s.at.rpm > s.inputs.max_rpm + 0.5);
+  }
 
-  renderChart($("#chart"), lastResult, { rpm, speed });
-  renderLegend($("#legend"), lastResult);
-  renderTable($("#table tbody"), lastResult, inputs, gearNum);
-  renderShiftTable($("#shift-table tbody"), lastResult);
+  renderChart($("#chart"), series, speed);
+  renderLegend($("#legend"), series);
+  renderTable($("#table tbody"), series);
+  renderShiftTable($("#shift-table tbody"), series);
 }
 
 /* ---------------------------------- init --------------------------------- */
 
+/** Show one setup's form; the other stays in the DOM so its values persist. */
+function selectTab(key) {
+  for (const k of SETUP_KEYS) {
+    const on = k === key;
+    $(`#tab-${k}`).setAttribute("aria-selected", String(on));
+    setupRoot(k).hidden = !on;
+  }
+}
+
+function onCompareChange() {
+  const on = comparing();
+  if (on && !seededB) {
+    // Start B as a copy of A: a comparison is only legible when one thing differs.
+    copySetup("a", "b");
+    seededB = true;
+  }
+
+  $("#setup-tabs").hidden = !on;
+  $("#gear_scope").hidden = !on;
+  $(".gauges").toggleAttribute("data-compare", on);
+  document.querySelectorAll("[data-setup-col]").forEach((el) => (el.hidden = !on));
+  $('.rpm-row[data-setup="b"]').hidden = !on;
+  $('.rpm-row[data-setup="a"] .rpm-tag').hidden = !on;
+
+  // Land on B when comparison opens: it is the form the user came here to fill in.
+  selectTab(on ? "b" : "a");
+  recompute();
+}
+
 function onUnitChange() {
   const slider = $("#cur_speed");
-  const oldMax = lastResult ? lastResult.max_speed : 0;
+  const oldMax = topSpeed();
   const oldValue = parseFloat(slider.value);
 
   // The tire size itself is unit-agnostic; `recompute` re-derives the diameter
   // in the newly selected unit, so only the label needs updating here.
-  document.querySelector("[data-tire-unit]").textContent =
-    currentUnits() === "metric" ? "mm" : "in";
+  document.querySelectorAll("[data-tire-unit]").forEach((el) => {
+    el.textContent = currentUnits() === "metric" ? "mm" : "in";
+  });
   recompute();
 
-  // Keep the slider on the same physical speed. Both the old and new top speeds
+  // Keep the slider on the same physical speed. Both the old and new ceilings
   // scale by the same factor across a unit change, so their ratio converts the
   // value exactly — no hardcoded 1.609344. Scale from the pre-clamp value, since
   // `recompute` may have pulled it down to the new (smaller) ceiling.
   if (oldMax > 0 && Number.isFinite(oldValue)) {
-    const scaled = Math.round(oldValue * (lastResult.max_speed / oldMax));
+    const scaled = Math.round(oldValue * (topSpeed() / oldMax));
     slider.value = String(Math.min(scaled, parseFloat(slider.max)));
     redraw();
   }
 }
 
-/** Once the user commits a shift RPM, pull it back under the redline. */
-function onShiftRpmCommit() {
-  const el = $("#shift_rpm");
-  const maxRpm = num("#max_rpm", 7000);
-  if (num("#shift_rpm", maxRpm) > maxRpm) {
-    el.value = String(maxRpm);
+/** Once the user commits a shift RPM, pull it back under that setup's redline. */
+function onShiftRpmCommit(root) {
+  const maxRpm = num(root, "max_rpm", 7000);
+  if (num(root, "shift_rpm", maxRpm) > maxRpm) {
+    field(root, "shift_rpm").value = String(maxRpm);
     recompute();
   }
 }
 
 function wireEvents() {
-  // Any change to a calculator input re-runs the Python math.
-  for (const id of [
-    "#tire_width", "#tire_aspect", "#tire_wheel",
-    "#final_drive", "#transfer", "#slip", "#max_rpm", "#shift_rpm",
-  ]) {
-    $(id).addEventListener("input", recompute);
-  }
-  $("#shift_rpm").addEventListener("change", onShiftRpmCommit);
-  $("#gear-list").addEventListener("input", recompute);
+  // Delegated: both setup forms are cloned at boot and their gear rows are rebuilt
+  // whenever a gear is added or removed, so nothing can hold a direct listener.
+  const setups = $("#setups");
+  setups.addEventListener("input", recompute);
+  setups.addEventListener("change", (e) => {
+    if (e.target.dataset.field === "shift_rpm") onShiftRpmCommit(e.target.closest(".setup"));
+  });
+  setups.addEventListener("click", (e) => {
+    const root = e.target.closest(".setup");
+    const add = e.target.closest("[data-add-gear]");
+    const remove = e.target.closest("[data-remove-gear]");
+    if (!root || (!add && !remove)) return;
+
+    const ratios = gearInputs(root).map((el) => parseFloat(el.value) || 1);
+    if (add && ratios.length < MAX_GEARS) {
+      const last = ratios[ratios.length - 1] ?? 1;
+      buildGearRows(root, [...ratios, Math.max(0.1, +(last * 0.8).toFixed(2))]);
+    } else if (remove && ratios.length > MIN_GEARS) {
+      buildGearRows(root, ratios.slice(0, -1));
+    } else {
+      return;
+    }
+    recompute();
+  });
+
+  $("#setup-tabs").addEventListener("click", (e) => {
+    const tab = e.target.closest("[role=tab]");
+    if (tab) selectTab(tab.dataset.setup);
+  });
+
+  $("#compare").addEventListener("change", onCompareChange);
   document.querySelectorAll('input[name="units"]').forEach((el) =>
     el.addEventListener("change", onUnitChange)
   );
 
-  // Only moves the needles/marker along the trace; the curves are unchanged.
+  // Only moves the needles/markers along the traces; the curves are unchanged.
   $("#cur_speed").addEventListener("input", redraw);
-
-  $("#add-gear").addEventListener("click", () => {
-    const ratios = gearInputs().map((el) => parseFloat(el.value) || 1);
-    if (ratios.length >= MAX_GEARS) return;
-    const last = ratios[ratios.length - 1] ?? 1;
-    buildGearRows([...ratios, Math.max(0.1, +(last * 0.8).toFixed(2))]);
-    recompute();
-  });
-
-  $("#remove-gear").addEventListener("click", () => {
-    const ratios = gearInputs().map((el) => parseFloat(el.value) || 1);
-    if (ratios.length <= MIN_GEARS) return;
-    buildGearRows(ratios.slice(0, -1));
-    recompute();
-  });
 }
 
 async function main() {
@@ -574,7 +742,10 @@ async function main() {
   pyAtSpeed = pyodide.globals.get("at_speed");
   pyTireDiameter = pyodide.globals.get("tire_diameter");
 
-  buildGearRows(DEFAULT_GEARS);
+  for (const key of SETUP_KEYS) {
+    buildSetupForm(key);
+    buildGearRows(setupRoot(key), DEFAULT_GEARS);
+  }
   wireEvents();
   recompute();
 

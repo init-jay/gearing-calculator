@@ -78,3 +78,22 @@ sidewall counted once above the rim and once below:
 ```
 tire_diameter_mm = wheel_diameter_in × 25.4 + 2 × section_width_mm × aspect / 100
 ```
+
+## Shift points
+
+Shifting does not change road speed — the clutch reconnects the same wheels at
+the same speed — so the engine drops to whatever RPM the next gear needs to hold
+that speed:
+
+```
+rpm_after_shift = rpm_shift × ratio_next / ratio_current
+```
+
+Tire diameter, final drive, transfer case and converter slip all cancel out of
+that expression: the RPM drop across a shift is a property of the gearbox alone,
+and is identical in metric and imperial. Only the road speed at which the shift
+happens depends on the rest of the drivetrain.
+
+The chart overlays a **shift trace** — the engine's path through a full
+acceleration run, climbing each gear to the shift RPM and then jumping across to
+the next gear at the same road speed.

@@ -125,6 +125,17 @@ class GearCurve:
 
 
 @dataclass
+class ShiftPoint:
+    """A single upshift: where the engine lands in the next gear."""
+
+    from_gear: int
+    to_gear: int
+    speed: float  # road speed at the shift, unchanged by it
+    rpm_after: float  # engine rpm once the next gear is engaged
+    rpm_drop: float  # how far the needle falls
+
+
+@dataclass
 class Inputs:
     """All calculator inputs; keeps the JS<->Python boundary explicit."""
 
@@ -135,10 +146,20 @@ class Inputs:
     slip: float = 0.0
     max_rpm: float = 7000.0
     units: Units = "metric"
+    shift_rpm: float | None = None  # None => shift at the redline
+
+    def effective_shift_rpm(self) -> float:
+        """The shift RPM actually used: defaults to, and never exceeds, redline."""
+        if self.shift_rpm is None:
+            return self.max_rpm
+        if self.shift_rpm <= 0:
+            raise ValueError("shift_rpm must be positive")
+        return min(self.shift_rpm, self.max_rpm)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Inputs":
         """Build from a plain dict (e.g. converted from a JS object)."""
+        shift_rpm = data.get("shift_rpm")
         return cls(
             gears=[float(g) for g in data["gears"] if float(g) > 0],
             final_drive=float(data.get("final_drive", 3.9)),
@@ -147,7 +168,80 @@ class Inputs:
             slip=float(data.get("slip", 0.0)),
             max_rpm=float(data.get("max_rpm", 7000.0)),
             units=data.get("units", "metric"),
+            shift_rpm=None if shift_rpm is None else float(shift_rpm),
         )
+
+
+def _speed(inputs: Inputs, rpm: float, ratio: float) -> float:
+    """``speed_at_rpm`` with the drivetrain arguments bound to ``inputs``."""
+    return speed_at_rpm(
+        rpm, ratio, inputs.final_drive, inputs.transfer, inputs.tire, inputs.slip, inputs.units
+    )
+
+
+def shift_points(inputs: Inputs) -> list[ShiftPoint]:
+    """Where the engine lands after each upshift, for ``n - 1`` gear pairs.
+
+    Road speed is continuous across a shift — the clutch reconnects the same
+    wheels at the same speed — so the engine must drop to whatever RPM the next
+    gear needs to hold that speed::
+
+        rpm_after = shift_rpm * ratio_next / ratio_current
+
+    Tire, final drive, transfer and slip cancel out of that identity, so they are
+    deliberately absent here rather than being divided back out through
+    :func:`rpm_at_speed`. Routing through the tire diameter would make the result
+    depend on the unit system in the last bits of the float, which is enough to
+    swing a rounded RPM display by one. ``test_speed_is_continuous_across_the_shift``
+    ties this back to :func:`speed_at_rpm` so the two cannot drift apart.
+
+    Gears are used in the order given. A gear list that is not ordered from
+    lowest to highest yields a negative ``rpm_drop`` — a downshift — which is
+    reported rather than hidden, since it means the ratios are entered wrong.
+    """
+    shift_rpm = inputs.effective_shift_rpm()
+    points: list[ShiftPoint] = []
+    for i in range(len(inputs.gears) - 1):
+        current, following = inputs.gears[i], inputs.gears[i + 1]
+        rpm_after = shift_rpm * following / current
+        points.append(
+            ShiftPoint(
+                from_gear=i + 1,
+                to_gear=i + 2,
+                speed=_speed(inputs, shift_rpm, current),
+                rpm_after=rpm_after,
+                rpm_drop=shift_rpm - rpm_after,
+            )
+        )
+    return points
+
+
+def shift_trace(inputs: Inputs) -> list[tuple[float, float]]:
+    """The ``(rpm, speed)`` path of a full acceleration run through every gear.
+
+    ``speed_at_rpm`` is linear in ``rpm``, so each gear contributes a straight
+    line and needs only its endpoints. Each shift adds a second point at the
+    same speed but lower rpm, which draws the horizontal jump between curves.
+
+    Built from :func:`shift_points` so the trace and the shift table can never
+    disagree about where a shift lands.
+    """
+    if not inputs.gears:
+        return []
+    shift_rpm = inputs.effective_shift_rpm()
+    shifts = shift_points(inputs)
+    last = len(inputs.gears) - 1
+
+    trace: list[tuple[float, float]] = [(0.0, 0.0)]
+    for i, ratio in enumerate(inputs.gears):
+        if i == last:
+            # The top gear has nothing to shift into, so it runs out to redline.
+            trace.append((inputs.max_rpm, _speed(inputs, inputs.max_rpm, ratio)))
+        else:
+            shift = shifts[i]
+            trace.append((shift_rpm, shift.speed))
+            trace.append((shift.rpm_after, shift.speed))
+    return trace
 
 
 @dataclass
@@ -159,6 +253,9 @@ class Result:
     max_rpm: float
     max_speed: float
     curves: list[GearCurve]
+    shift_rpm: float
+    shifts: list[ShiftPoint]
+    trace: list[tuple[float, float]]
 
     def to_dict(self) -> dict:
         """Plain-dict form for easy consumption from JS via ``.toJs()``."""
@@ -176,14 +273,27 @@ class Result:
                 }
                 for c in self.curves
             ],
+            "shift_rpm": self.shift_rpm,
+            "shifts": [
+                {
+                    "from_gear": s.from_gear,
+                    "to_gear": s.to_gear,
+                    "speed": s.speed,
+                    "rpm_after": s.rpm_after,
+                    "rpm_drop": s.rpm_drop,
+                }
+                for s in self.shifts
+            ],
+            "trace": self.trace,
         }
 
 
 def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
-    """Compute speed-vs-RPM curves and top speeds for every gear.
+    """Compute speed-vs-RPM curves, top speeds, and shift points for every gear.
 
     Samples each gear from ``step`` up to ``max_rpm`` (inclusive) so the
-    frontend can draw one polyline per gear plus a top-speed table.
+    frontend can draw one polyline per gear plus a top-speed table, and adds the
+    shift points and acceleration trace for the configured shift RPM.
     """
     if step <= 0:
         raise ValueError("step must be positive")
@@ -200,21 +310,7 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
     curves: list[GearCurve] = []
     max_speed = 0.0
     for i, ratio in enumerate(inputs.gears, start=1):
-        samples = [
-            (
-                p,
-                speed_at_rpm(
-                    p,
-                    ratio,
-                    inputs.final_drive,
-                    inputs.transfer,
-                    inputs.tire,
-                    inputs.slip,
-                    inputs.units,
-                ),
-            )
-            for p in points
-        ]
+        samples = [(p, _speed(inputs, p, ratio)) for p in points]
         top = samples[-1][1]
         max_speed = max(max_speed, top)
         curves.append(GearCurve(gear=i, ratio=ratio, top_speed=top, samples=samples))
@@ -225,6 +321,9 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
         max_rpm=inputs.max_rpm,
         max_speed=max_speed,
         curves=curves,
+        shift_rpm=inputs.effective_shift_rpm(),
+        shifts=shift_points(inputs),
+        trace=shift_trace(inputs),
     )
 
 

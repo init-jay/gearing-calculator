@@ -100,6 +100,135 @@ def test_compute_dict_honours_explicit_imperial():
     assert out["speed_unit"] == "mph"
 
 
+# --------------------------------- shifts ---------------------------------
+
+
+def test_shift_lands_at_ratio_scaled_rpm():
+    # 2.0 -> 1.0 halves the ratio, so the engine halves its rpm.
+    (shift,) = calc.shift_points(calc.Inputs(gears=[2.0, 1.0], shift_rpm=6000))
+    assert shift.from_gear == 1 and shift.to_gear == 2
+    assert isclose(shift.rpm_after, 3000.0, rel_tol=1e-12)
+    assert isclose(shift.rpm_drop, 3000.0, rel_tol=1e-12)
+
+
+def test_speed_is_continuous_across_the_shift():
+    # The property the whole trace rests on: the wheels don't change speed, so
+    # the landing rpm must reproduce the shift speed in the next gear.
+    inputs = calc.Inputs(gears=[3.6, 2.1, 1.4], slip=0.07, shift_rpm=6200)
+    for shift in calc.shift_points(inputs):
+        landed = calc.speed_at_rpm(
+            shift.rpm_after,
+            inputs.gears[shift.to_gear - 1],
+            inputs.final_drive,
+            inputs.transfer,
+            inputs.tire,
+            inputs.slip,
+            inputs.units,
+        )
+        assert isclose(landed, shift.speed, rel_tol=1e-9)
+
+
+def test_shift_rpm_is_independent_of_slip_and_tire():
+    # rpm_after = shift_rpm * ratio_next / ratio_current; everything else cancels.
+    base = calc.shift_points(calc.Inputs(gears=[3.6, 2.1], shift_rpm=6000))[0]
+    for variant in (
+        calc.Inputs(gears=[3.6, 2.1], shift_rpm=6000, slip=0.3),
+        calc.Inputs(gears=[3.6, 2.1], shift_rpm=6000, tire=800.0),
+        calc.Inputs(gears=[3.6, 2.1], shift_rpm=6000, final_drive=2.5, transfer=1.7),
+    ):
+        assert isclose(calc.shift_points(variant)[0].rpm_after, base.rpm_after, rel_tol=1e-9)
+
+
+def test_shift_rpm_is_unit_independent():
+    # Same physical car described two ways: engine rpm is a property of the
+    # gearbox, so only the road speed column may differ.
+    #
+    # Equality here is *exact*, not approximate. Deriving rpm_after by dividing
+    # the shift speed back out through the tire leaves ~1e-13 of unit-dependent
+    # float noise, which is enough to round 1312.5 rpm to 1313 in one unit
+    # system and 1312 in the other. Keep this assertion exact so that
+    # regression cannot come back.
+    gears = [3.6, 2.1, 1.4, 1.0, 0.8, 0.65]
+    metric = calc.shift_points(calc.Inputs(gears=gears, tire=635.0, shift_rpm=7000))
+    imperial = calc.shift_points(
+        calc.Inputs(gears=gears, tire=25.0, units="imperial", shift_rpm=7000)
+    )
+    for m, i in zip(metric, imperial):
+        assert m.rpm_after == i.rpm_after
+        assert m.rpm_drop == i.rpm_drop
+        assert isclose(m.speed, i.speed * 1.609344, rel_tol=1e-9)
+
+    # The 5->6 pair is the one that actually tripped the rounding bug.
+    assert metric[-1].rpm_drop == 1312.5
+
+
+def test_shift_count_is_one_less_than_gears():
+    assert len(calc.shift_points(calc.Inputs(gears=[3.6, 2.1, 1.4, 1.0, 0.8, 0.65]))) == 5
+    assert calc.shift_points(calc.Inputs(gears=[3.0])) == []
+
+
+def test_badly_ordered_gears_report_a_negative_drop():
+    # A "taller" first gear is a downshift, not an upshift. Surface it.
+    (shift,) = calc.shift_points(calc.Inputs(gears=[1.0, 2.0], shift_rpm=3000))
+    assert shift.rpm_drop < 0
+    assert isclose(shift.rpm_after, 6000.0, rel_tol=1e-12)
+
+
+def test_shift_rpm_defaults_to_redline_and_clamps():
+    assert calc.Inputs(gears=[1.0], max_rpm=6500).effective_shift_rpm() == 6500
+    assert calc.Inputs(gears=[1.0], max_rpm=6500, shift_rpm=5000).effective_shift_rpm() == 5000
+    # Shifting above the redline is not a thing.
+    assert calc.Inputs(gears=[1.0], max_rpm=6500, shift_rpm=9000).effective_shift_rpm() == 6500
+    with pytest.raises(ValueError):
+        calc.Inputs(gears=[1.0], shift_rpm=0).effective_shift_rpm()
+
+
+# ---------------------------------- trace ----------------------------------
+
+
+def test_trace_shape_and_monotonic_speed():
+    gears = [3.6, 2.1, 1.4, 1.0, 0.8, 0.65]
+    inputs = calc.Inputs(gears=gears, max_rpm=7000, shift_rpm=6500)
+    trace = calc.shift_trace(inputs)
+
+    # Origin, then two points per gear minus the top gear's absent upshift.
+    assert len(trace) == 2 * len(gears)
+    assert trace[0] == (0.0, 0.0)
+    assert trace[-1][0] == 7000  # top gear runs out to the redline, not the shift point
+
+    speeds = [s for _, s in trace]
+    assert speeds == sorted(speeds)  # never lose road speed
+
+
+def test_trace_jumps_backwards_in_rpm_at_each_shift():
+    inputs = calc.Inputs(gears=[3.6, 2.1, 1.4], shift_rpm=6000)
+    trace = calc.shift_trace(inputs)
+    # Points 1..n pair up as (shift, landing): same speed, strictly lower rpm.
+    for shift_pt, landing in zip(trace[1::2], trace[2::2]):
+        assert isclose(shift_pt[1], landing[1], rel_tol=1e-9)  # speed held
+        assert landing[0] < shift_pt[0]  # rpm dropped
+
+
+def test_trace_of_single_gear_is_a_straight_line():
+    trace = calc.shift_trace(calc.Inputs(gears=[3.0], max_rpm=7000))
+    assert len(trace) == 2
+    assert trace[0] == (0.0, 0.0)
+    assert trace[1][0] == 7000
+
+
+def test_compute_exposes_shifts_and_trace():
+    out = calc.compute({"gears": [3.6, 2.1, 1.0], "shift_rpm": 6000, "max_rpm": 7000})
+    assert out["shift_rpm"] == 6000
+    assert len(out["shifts"]) == 2
+    first = out["shifts"][0]
+    assert (first["from_gear"], first["to_gear"]) == (1, 2)
+    assert isclose(first["rpm_after"], 3500.0)  # 6000 * 2.1 / 3.6
+    assert isclose(first["rpm_drop"], 2500.0)
+    assert len(out["trace"]) == 6
+    # Omitting shift_rpm falls back to the redline.
+    assert calc.compute({"gears": [1.0], "max_rpm": 6800})["shift_rpm"] == 6800
+
+
 def test_defaults_are_metric():
     # Locks in the metric default so flipping it back is a deliberate change.
     inputs = calc.Inputs(gears=[1.0])

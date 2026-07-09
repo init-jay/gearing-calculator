@@ -188,6 +188,18 @@ function renderChart(svg, result, current) {
     svg.append(svgEl("polyline", { class: "chart-line", points: pts, stroke: gearColor(i) }));
   });
 
+  // The acceleration run: up each gear to the shift RPM, then across to the
+  // next gear at the same road speed. Drawn over the curves it annotates.
+  if (result.trace.length) {
+    const pts = result.trace.map(([rpm, spd]) => `${xPix(rpm)},${yPix(spd)}`).join(" ");
+    svg.append(svgEl("polyline", { class: "chart-trace", points: pts }));
+    result.shifts.forEach((s) => {
+      svg.append(
+        svgEl("circle", { class: "chart-shift", cx: xPix(result.shift_rpm), cy: yPix(s.speed), r: 3 })
+      );
+    });
+  }
+
   // Marker for the currently selected gear + RPM.
   if (current && current.rpm > 0 && current.rpm <= xMax) {
     svg.append(
@@ -209,6 +221,14 @@ function renderLegend(el, result) {
     span.append(sw, document.createTextNode(`Gear ${curve.gear} (${curve.ratio.toFixed(2)})`));
     el.append(span);
   });
+
+  if (result.shifts.length) {
+    const span = document.createElement("span");
+    const sw = document.createElement("i");
+    sw.className = "swatch swatch-trace";
+    span.append(sw, document.createTextNode(`Shift trace (@ ${Math.round(result.shift_rpm)} rpm)`));
+    el.append(span);
+  }
 }
 
 /* --------------------------------- table --------------------------------- */
@@ -224,6 +244,25 @@ function renderTable(tbody, result, inputs, currentGear) {
       curve.ratio.toFixed(3),
       overall.toFixed(3),
       curve.top_speed.toFixed(1),
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.append(td);
+    }
+    tbody.append(tr);
+  });
+}
+
+/** One row per upshift: where the engine lands in the next gear. */
+function renderShiftTable(tbody, result) {
+  tbody.replaceChildren();
+  result.shifts.forEach((s) => {
+    const tr = document.createElement("tr");
+    for (const text of [
+      `${s.from_gear} → ${s.to_gear}`,
+      s.speed.toFixed(1),
+      s.rpm_after.toFixed(1),
+      String(Math.round(s.rpm_drop)),
     ]) {
       const td = document.createElement("td");
       td.textContent = text;
@@ -267,6 +306,7 @@ function readInputs() {
     tire: num("#tire", 634.3),
     slip: num("#slip", 0) / 100,
     max_rpm: num("#max_rpm", 7000),
+    shift_rpm: num("#shift_rpm", 7000),
     units: currentUnits(),
   };
 }
@@ -330,6 +370,12 @@ function recompute() {
   slider.max = String(inputs.max_rpm);
   if (parseFloat(slider.value) > inputs.max_rpm) slider.value = String(inputs.max_rpm);
 
+  // Advertise the ceiling, but don't rewrite the value here: `recompute` runs on
+  // every keystroke, and a half-typed redline ("8" of "8000") would clobber it.
+  // Python clamps the shift RPM to the redline anyway, so the math stays right;
+  // `onShiftRpmCommit` tidies the field once the user is done typing.
+  $("#shift_rpm").max = String(inputs.max_rpm);
+
   const pyIn = pyodide.toPy(inputs);
   let proxy;
   try {
@@ -378,6 +424,7 @@ function redraw() {
   renderChart($("#chart"), lastResult, { rpm, speed, gearIndex });
   renderLegend($("#legend"), lastResult);
   renderTable($("#table tbody"), lastResult, inputs, gearNum);
+  renderShiftTable($("#shift-table tbody"), lastResult);
 }
 
 /* ---------------------------------- init --------------------------------- */
@@ -390,14 +437,25 @@ function onUnitChange() {
   recompute();
 }
 
+/** Once the user commits a shift RPM, pull it back under the redline. */
+function onShiftRpmCommit() {
+  const el = $("#shift_rpm");
+  const maxRpm = num("#max_rpm", 7000);
+  if (num("#shift_rpm", maxRpm) > maxRpm) {
+    el.value = String(maxRpm);
+    recompute();
+  }
+}
+
 function wireEvents() {
   // Any change to a calculator input re-runs the Python math.
   for (const id of [
     "#tire_width", "#tire_aspect", "#tire_wheel",
-    "#final_drive", "#transfer", "#slip", "#max_rpm",
+    "#final_drive", "#transfer", "#slip", "#max_rpm", "#shift_rpm",
   ]) {
     $(id).addEventListener("input", recompute);
   }
+  $("#shift_rpm").addEventListener("change", onShiftRpmCommit);
   $("#gear-list").addEventListener("input", recompute);
   document.querySelectorAll('input[name="units"]').forEach((el) =>
     el.addEventListener("change", onUnitChange)

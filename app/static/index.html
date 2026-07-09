@@ -79,6 +79,11 @@
           <input type="number" id="max_rpm" value="7000" min="500" step="100" />
         </div>
 
+        <div class="field">
+          <label for="shift_rpm">Shift at RPM</label>
+          <input type="number" id="shift_rpm" value="7000" min="500" step="100" />
+        </div>
+
         <div class="gears">
           <div class="gears-header">
             <h3>Transmission gears</h3>
@@ -127,6 +132,21 @@
                 <th>Ratio</th>
                 <th>Overall</th>
                 <th>Top speed <span data-speed-unit>km/h</span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <h3>Shift points</h3>
+        <div class="table-wrap">
+          <table id="shift-table">
+            <thead>
+              <tr>
+                <th>Shift</th>
+                <th>Speed <span data-speed-unit>km/h</span></th>
+                <th>RPM after</th>
+                <th>RPM drop</th>
               </tr>
             </thead>
             <tbody></tbody>

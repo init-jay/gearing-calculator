@@ -586,10 +586,37 @@ def test_crossovers_need_two_gears():
     assert calc.shift_crossovers(inputs) == []
 
 
-def test_at_speed_reports_force_only_inside_the_curve():
+def test_at_speed_reports_the_operating_point_only_inside_the_curve():
     data = {"gears": STOCK, "torque_curve": CURVE}
     fast = calc.at_speed(data, 100.0)
-    assert fast["force"] is not None and fast["force"] > 0
-    # Crawling: 1st gear at 1 km/h is below the curve's first point.
-    assert calc.at_speed(data, 1.0)["force"] is None
-    assert calc.at_speed({"gears": STOCK}, 100.0)["force"] is None
+    assert all(fast[k] is not None and fast[k] > 0 for k in ("torque", "power", "force"))
+    # Crawling: 1st gear at 1 km/h is below the curve's first point. The three
+    # curve-dependent fields go None together, so a chart marker can test any one.
+    slow = calc.at_speed(data, 1.0)
+    assert (slow["torque"], slow["power"], slow["force"]) == (None, None, None)
+    bare = calc.at_speed({"gears": STOCK}, 100.0)
+    assert (bare["torque"], bare["power"], bare["force"]) == (None, None, None)
+
+
+def test_at_speed_operating_point_is_self_consistent():
+    # The marker on the torque curve and the marker on the power curve must sit at
+    # the same rpm and satisfy power = torque * rpm / K, or they describe different
+    # engines. Force must agree with the same torque through the same gear.
+    data = {"gears": STOCK, "torque_curve": CURVE}
+    at = calc.at_speed(data, 100.0)
+    inputs = calc.Inputs.from_dict(data)
+
+    assert isclose(at["torque"], calc.torque_at_rpm(CURVE, at["rpm"]), rel_tol=1e-12)
+    assert isclose(at["power"], calc.power_at_rpm(at["torque"], at["rpm"]), rel_tol=1e-12)
+    assert isclose(at["force"], calc._effort(inputs, at["ratio"], at["rpm"]), rel_tol=1e-12)
+
+
+def test_at_speed_operating_point_walks_up_the_curve_with_speed():
+    # Within one gear, more speed is more rpm, so the markers slide along the
+    # curves. Torque may rise or fall; rpm and the marker's x position may not.
+    data = {"gears": STOCK, "torque_curve": CURVE}
+    inputs = calc.Inputs.from_dict(data)
+    top = calc.shift_points(inputs)[0].speed
+    rpms = [calc.at_speed(data, top * f)["rpm"] for f in (0.6, 0.7, 0.8, 0.9)]
+    assert rpms == sorted(rpms)
+    assert all(calc.at_speed(data, top * f)["torque"] is not None for f in (0.6, 0.9))

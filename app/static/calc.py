@@ -704,9 +704,11 @@ def at_speed(data: dict, speed: float) -> dict:
     needs to hold ``speed``. Together these place the chart marker on the shift
     trace for any speed in the run.
 
-    ``force`` is the tractive effort there, or ``None`` when there is no torque
-    curve or the engine would be outside the range it covers — the latter happens
-    below the curve's first point, where a real car would be slipping the clutch.
+    ``torque``, ``power`` and ``force`` describe the engine's operating point
+    there, and are all ``None`` together when there is no torque curve or the
+    engine would be outside the range it covers — the latter happens below the
+    curve's first point, where a real car would be slipping the clutch, and above
+    the redline, where a setup is being asked for a speed it cannot reach.
     """
     inputs = Inputs.from_dict(data)
     gear = gear_at_speed(inputs, speed)
@@ -714,8 +716,13 @@ def at_speed(data: dict, speed: float) -> dict:
     rpm = _rpm(inputs, speed, ratio)
 
     span = inputs.curve_span()
-    force = None
+    torque = power = force = None
     if span is not None and span[0] <= rpm <= span[1]:
+        torque = torque_at_rpm(inputs.torque_curve, rpm)
+        power = power_at_rpm(torque, rpm, inputs.units)
         force = _effort(inputs, ratio, rpm)
 
-    return {"gear": gear, "ratio": ratio, "rpm": rpm, "force": force}
+    return {
+        "gear": gear, "ratio": ratio, "rpm": rpm,
+        "torque": torque, "power": power, "force": force,
+    }

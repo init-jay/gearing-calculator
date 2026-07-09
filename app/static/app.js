@@ -484,7 +484,14 @@ function renderEffortChart(svg, series, speed) {
   });
 }
 
-/** Torque and its derived power against engine speed, on twinned axes. */
+/**
+ * Torque and its derived power against engine speed, on twinned axes.
+ *
+ * The markers are the engine's operating point at the current road speed, one on
+ * each curve — so dragging the speed slider walks them along the torque and power
+ * lines together. The peaks are named in the caption instead; a static dot and a
+ * live dot on the same curve read as the same thing.
+ */
 function renderEngineChart(svg, series) {
   const W = 640;
   const H = 300;
@@ -506,11 +513,15 @@ function renderEngineChart(svg, series) {
     const power = s.result.engine.map(([rpm, , p]) => `${xPix(rpm)},${y2Pix(p)}`).join(" ");
     svg.append(svgEl("polyline", { class: `chart-torque chart-torque-${s.key}`, points: torque }));
     svg.append(svgEl("polyline", { class: `chart-power chart-power-${s.key}`, points: power }));
+  });
 
-    const [tRpm, tVal] = s.result.peak_torque;
-    const [pRpm, pVal] = s.result.peak_power;
-    svg.append(svgEl("circle", { class: "chart-peak", cx: xPix(tRpm), cy: yPix(tVal), r: 3.5 }));
-    svg.append(svgEl("circle", { class: "chart-peak", cx: xPix(pRpm), cy: y2Pix(pVal), r: 3.5 }));
+  // Drawn after every curve so a marker is never buried under the other setup's
+  // line. `None` arrives from Python as `undefined`: the engine is off the curve.
+  series.forEach((s) => {
+    if (!Number.isFinite(s.at.torque)) return;
+    const x = xPix(s.at.rpm);
+    svg.append(svgEl("circle", { class: `chart-marker chart-marker-${s.key}`, cx: x, cy: yPix(s.at.torque), r: 4 }));
+    svg.append(svgEl("circle", { class: `chart-marker chart-marker-${s.key}`, cx: x, cy: y2Pix(s.at.power), r: 4 }));
   });
 }
 

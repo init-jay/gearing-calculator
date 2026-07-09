@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gearing Calculator</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Vendored locally: nothing is fetched from a CDN. -->
+  <script src="pyodide/pyodide.js"></script>
+</head>
+<body>
+  <div id="loading" class="loading">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Loading Python…</p>
+  </div>
+
+  <main id="app" hidden>
+    <header class="page-header">
+      <h1>Gearing Calculator</h1>
+      <p class="subtitle">
+        Engine RPM ↔ road speed through the drivetrain. Math runs in Python,
+        in your browser.
+      </p>
+    </header>
+
+    <div class="layout">
+      <!-- ------------------------------ inputs ------------------------------ -->
+      <section class="panel" aria-labelledby="inputs-heading">
+        <h2 id="inputs-heading">Inputs</h2>
+
+        <fieldset class="units">
+          <legend>Units</legend>
+          <label>
+            <input type="radio" name="units" value="imperial" checked />
+            <span>Imperial (in, mph)</span>
+          </label>
+          <label>
+            <input type="radio" name="units" value="metric" />
+            <span>Metric (mm, km/h)</span>
+          </label>
+        </fieldset>
+
+        <div class="field">
+          <label for="tire">Tire diameter <span class="unit" data-tire-unit>in</span></label>
+          <input type="number" id="tire" value="25" min="1" step="0.1" />
+        </div>
+
+        <div class="field">
+          <label for="final_drive">Final drive (diff) ratio</label>
+          <input type="number" id="final_drive" value="3.9" min="0.01" step="0.01" />
+        </div>
+
+        <div class="field">
+          <label for="transfer">Transfer case ratio</label>
+          <input type="number" id="transfer" value="1.0" min="0.01" step="0.01" />
+        </div>
+
+        <div class="field">
+          <label for="slip">Converter slip <span class="unit">%</span></label>
+          <input type="number" id="slip" value="0" min="0" max="99" step="0.5" />
+        </div>
+
+        <div class="field">
+          <label for="max_rpm">Max RPM (redline)</label>
+          <input type="number" id="max_rpm" value="7000" min="500" step="100" />
+        </div>
+
+        <div class="gears">
+          <div class="gears-header">
+            <h3>Transmission gears</h3>
+            <div class="gear-buttons">
+              <button type="button" id="remove-gear" title="Remove last gear">−</button>
+              <button type="button" id="add-gear" title="Add a gear">+</button>
+            </div>
+          </div>
+          <div id="gear-list"></div>
+        </div>
+      </section>
+
+      <!-- ------------------------------ results ----------------------------- -->
+      <section class="panel results" aria-labelledby="results-heading">
+        <h2 id="results-heading">Results</h2>
+
+        <div class="gauges">
+          <svg id="tach" class="gauge" viewBox="0 0 200 182" role="img"
+               aria-label="Tachometer"></svg>
+          <svg id="speedo" class="gauge" viewBox="0 0 200 182" role="img"
+               aria-label="Speedometer"></svg>
+        </div>
+
+        <div class="controls">
+          <div class="field">
+            <label for="cur_rpm">Current RPM <output id="cur_rpm_out">3000</output></label>
+            <input type="range" id="cur_rpm" min="0" max="7000" step="50" value="3000" />
+          </div>
+          <div class="field">
+            <label for="cur_gear">Gear</label>
+            <select id="cur_gear"></select>
+          </div>
+        </div>
+
+        <h3>Speed vs RPM</h3>
+        <svg id="chart" class="chart" viewBox="0 0 640 360" role="img"
+             aria-label="Speed versus RPM by gear"></svg>
+        <div id="legend" class="legend"></div>
+
+        <h3>Top speed per gear</h3>
+        <div class="table-wrap">
+          <table id="table">
+            <thead>
+              <tr>
+                <th>Gear</th>
+                <th>Ratio</th>
+                <th>Overall</th>
+                <th>Top speed <span data-speed-unit>mph</span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

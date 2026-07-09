@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mkdir -p /Users/jay/Documents/Repos/gearing-calculator/.devcontainer)"
+      "Bash(mkdir -p /Users/jay/Documents/Repos/gearing-calculator/.devcontainer)",
+      "Bash(uv init *)"
     ],
     "additionalDirectories": [
       "/Users/jay/Documents/Repos/gearing-calculator"

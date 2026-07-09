@@ -1,0 +1,320 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #16191d;
+  --muted: #666e79;
+  --border: #e0e4e9;
+  --accent: #2f6fed;
+  --accent-soft: #eaf1fe;
+  --grid: #e6e9ee;
+  --needle: #d64545;
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --text: #e7eaee;
+    --muted: #9aa4b1;
+    --border: #2a313a;
+    --accent: #6f9bff;
+    --accent-soft: #1c2534;
+    --grid: #262d36;
+    --needle: #ff6b6b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* Must beat the `display` rules below (e.g. .loading{display:grid}), which
+   would otherwise override the UA stylesheet's [hidden]{display:none}. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* ------------------------------- loading -------------------------------- */
+.loading {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1rem;
+  min-height: 100vh;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+
+/* -------------------------------- layout -------------------------------- */
+main {
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0.25rem 0 2rem;
+  color: var(--muted);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.panel h2 {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.panel h3 {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.results h3:first-of-type { margin-top: 1rem; }
+
+/* -------------------------------- inputs -------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.9rem;
+}
+
+.field label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.unit { opacity: 0.75; }
+
+input[type="number"],
+input[type="text"],
+select {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+output {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
+}
+
+fieldset.units {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin: 0 0 1rem;
+}
+
+fieldset.units legend {
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 0 0.3rem;
+}
+
+fieldset.units label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+/* -------------------------------- gears --------------------------------- */
+.gears-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gears-header h3 { margin: 1.25rem 0 0.75rem; }
+
+.gear-buttons { display: flex; gap: 0.35rem; }
+
+.gear-buttons button {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.gear-buttons button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.gear-buttons button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.gear-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.gear-row span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.gear-row .swatch {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+  margin-right: 0.35rem;
+}
+
+/* -------------------------------- gauges -------------------------------- */
+.gauges {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.gauge { width: 100%; height: auto; }
+
+.gauge-face { fill: none; stroke: var(--grid); stroke-width: 10; }
+.gauge-arc { fill: none; stroke: var(--accent); stroke-width: 10; }
+.gauge-redline { fill: none; stroke: var(--needle); stroke-width: 10; opacity: 0.55; }
+.gauge-tick { stroke: var(--muted); stroke-width: 1.5; opacity: 0.6; }
+.gauge-tick-label { fill: var(--muted); font-size: 9px; text-anchor: middle; }
+.gauge-needle { stroke: var(--needle); stroke-width: 2.5; stroke-linecap: round; }
+.gauge-hub { fill: var(--needle); }
+.gauge-value { fill: var(--text); font-size: 21px; font-weight: 650; text-anchor: middle; }
+.gauge-label { fill: var(--muted); font-size: 10px; text-anchor: middle; letter-spacing: 0.06em; }
+
+.controls {
+  display: grid;
+  grid-template-columns: 1fr 7rem;
+  gap: 1rem;
+  align-items: end;
+  margin-top: 0.75rem;
+}
+
+/* -------------------------------- chart --------------------------------- */
+.chart {
+  width: 100%;
+  height: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.chart-grid { stroke: var(--grid); stroke-width: 1; }
+.chart-axis { stroke: var(--muted); stroke-width: 1.2; opacity: 0.7; }
+.chart-label { fill: var(--muted); font-size: 11px; }
+.chart-axis-title { fill: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
+.chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-marker { stroke: var(--text); stroke-width: 1.5; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+.legend .swatch {
+  width: 0.75rem;
+  height: 0.2rem;
+  border-radius: 2px;
+}
+
+/* -------------------------------- table --------------------------------- */
+.table-wrap { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+th, td {
+  text-align: right;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th:first-child, td:first-child { text-align: left; }
+
+th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.is-current { background: var(--accent-soft); }

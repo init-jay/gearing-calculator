@@ -1,0 +1,18 @@
+[project]
+name = "gearing-calculator"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.12"
+description = "A modern, local, in-browser (Pyodide) vehicle gearing calculator."
+dependencies = [
+    "fastapi>=0.139.0",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -9,3 +9,6 @@ venv/
 dist/
 build/
 .env
+
+# Vendored Pyodide runtime (~10-15 MB). Re-fetch with: uv run scripts/vendor_pyodide.py
+app/static/pyodide/

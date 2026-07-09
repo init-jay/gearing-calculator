@@ -100,22 +100,31 @@
           </div>
         </div>
 
-        <h3>RPM vs Speed</h3>
-        <svg id="chart" class="chart" viewBox="0 0 640 360" role="img"
-             aria-label="Engine RPM versus road speed by gear"></svg>
-        <div id="legend" class="legend"></div>
+        <!-- <details> collapses each chart with no script and no ARIA of its own.
+             The SVGs are sized by viewBox, so a closed one costs nothing to keep
+             drawing and reopens already current. -->
+        <details class="viz" open>
+          <summary>RPM vs Speed</summary>
+          <svg id="chart" class="chart" viewBox="0 0 640 360" role="img"
+               aria-label="Engine RPM versus road speed by gear"></svg>
+          <div id="legend" class="legend"></div>
+        </details>
 
         <!-- Hidden together whenever the torque curve is too short to plot. -->
         <div id="effort-section">
-          <h3>Tractive effort</h3>
-          <svg id="effort-chart" class="chart" viewBox="0 0 640 360" role="img"
-               aria-label="Tractive effort versus road speed, by gear"></svg>
-          <div id="effort-legend" class="legend"></div>
+          <details class="viz" open>
+            <summary>Tractive effort</summary>
+            <svg id="effort-chart" class="chart" viewBox="0 0 640 360" role="img"
+                 aria-label="Tractive effort versus road speed, by gear"></svg>
+            <div id="effort-legend" class="legend"></div>
+          </details>
 
-          <h3>Engine curve</h3>
-          <svg id="engine-chart" class="chart" viewBox="0 0 640 300" role="img"
-               aria-label="Engine torque and power versus RPM"></svg>
-          <div id="engine-peaks" class="legend"></div>
+          <details class="viz" open>
+            <summary>Engine curve</summary>
+            <svg id="engine-chart" class="chart" viewBox="0 0 640 300" role="img"
+                 aria-label="Engine torque and power versus RPM"></svg>
+            <div id="engine-peaks" class="legend"></div>
+          </details>
 
           <h3>Optimal shift points</h3>
           <p class="hint">
@@ -233,6 +242,9 @@
           <button type="button" data-add-gear title="Add a gear">+</button>
         </div>
       </div>
+      <!-- Options come from presets.json; editing any ratio below reselects
+           "Custom", since the numbers no longer are what the name claims. -->
+      <select class="preset" data-preset="gearbox" aria-label="Gearbox preset"></select>
       <div data-gear-list></div>
     </div>
 
@@ -244,6 +256,7 @@
           <button type="button" data-add-point title="Add a point">+</button>
         </div>
       </div>
+      <select class="preset" data-preset="engine" aria-label="Engine preset"></select>
       <!-- Power is not an input: it is torque times engine speed, so the third
            column is derived on every keystroke. -->
       <div class="curve-head">

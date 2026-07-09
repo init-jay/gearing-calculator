@@ -9,20 +9,19 @@
  * tables — takes a list of setups, which is one entry long in the normal case.
  */
 
-const DEFAULT_GEARS = [5.14, 2.83, 1.79, 1.26, 1.0, 0.83];
 const MAX_GEARS = 8;
 const MIN_GEARS = 1;
-
-// A mild naturally-aspirated six: peak torque at 4000, power still climbing at
-// the limiter. Metric (rpm, N·m); Python restates it when imperial is selected.
-const DEFAULT_TORQUE_CURVE = [
-  [1000, 180], [2000, 220], [3000, 245], [4000, 255],
-  [5000, 250], [6000, 235], [7000, 205],
-];
 const MAX_CURVE_POINTS = 12;
 const MIN_CURVE_POINTS = 2;
 
 const SETUP_KEYS = ["a", "b"];
+
+/**
+ * Gearbox and engine presets from presets.json, whose first entry of each seeds
+ * a fresh setup — so the defaults live in the data file, not in two places.
+ * Preset torque curves are always N·m and are restated when imperial is selected.
+ */
+let presets = { gearboxes: [], engines: [] };
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -649,6 +648,10 @@ function buildSetupForm(key) {
   frag.querySelectorAll("[id]").forEach((el) => (el.id = `${key}-${el.id}`));
   labels.forEach((el) => (el.htmlFor = `${key}-${el.htmlFor}`));
   setupRoot(key).append(frag);
+
+  const root = setupRoot(key);
+  fillPresetSelect(presetSelect(root, "gearbox"), presets.gearboxes);
+  fillPresetSelect(presetSelect(root, "engine"), presets.engines);
 }
 
 /**
@@ -786,6 +789,44 @@ function convertCurve(points, units) {
   }
 }
 
+/* -------------------------------- presets -------------------------------- */
+
+const presetSelect = (root, kind) => root.querySelector(`[data-preset="${kind}"]`);
+
+/** Options are indices into `presets`; the empty value means hand-entered. */
+function fillPresetSelect(sel, items) {
+  sel.replaceChildren(new Option("Custom", ""));
+  items.forEach((item, i) => sel.append(new Option(item.name, String(i))));
+}
+
+/**
+ * A preset names a set of numbers. Once any of those numbers is edited the name
+ * is a lie, so every path that touches a ratio or a curve point clears it.
+ */
+function markCustom(root, kind) {
+  presetSelect(root, kind).value = "";
+}
+
+function applyPreset(root, sel) {
+  const chosen = presets[sel.dataset.preset === "gearbox" ? "gearboxes" : "engines"][sel.value];
+  if (!chosen) return; // re-picking "Custom" keeps whatever is on screen
+
+  if (sel.dataset.preset === "gearbox") {
+    buildGearRows(root, chosen.gears);
+  } else {
+    // The redline belongs to the engine, so it comes along. Presets are metric.
+    const curve = currentUnits() === "metric"
+      ? chosen.torque_curve
+      : convertCurve(chosen.torque_curve, "imperial");
+    buildCurveRows(root, curve);
+    field(root, "max_rpm").value = String(chosen.redline);
+    // Keep an earlier shift point if the user chose one; never exceed the redline.
+    const shift = num(root, "shift_rpm", chosen.redline);
+    field(root, "shift_rpm").value = String(Math.min(shift, chosen.redline));
+  }
+  recompute();
+}
+
 /** Seed one setup from another, so comparison starts from a single changed field. */
 function copySetup(from, to) {
   const src = setupRoot(from);
@@ -795,6 +836,10 @@ function copySetup(from, to) {
   src.querySelectorAll("[data-field]").forEach((el) => {
     field(dst, el.dataset.field).value = el.value;
   });
+  // Copy the preset names too, or B would read "Custom" while showing A's numbers.
+  for (const kind of ["gearbox", "engine"]) {
+    presetSelect(dst, kind).value = presetSelect(src, kind).value;
+  }
 }
 
 /* ------------------------------ python bridge ---------------------------- */
@@ -1015,9 +1060,20 @@ function wireEvents() {
   // Delegated: both setup forms are cloned at boot and their gear rows are rebuilt
   // whenever a gear is added or removed, so nothing can hold a direct listener.
   const setups = $("#setups");
-  setups.addEventListener("input", recompute);
+  setups.addEventListener("input", (e) => {
+    const root = e.target.closest(".setup");
+    if (e.target.dataset.preset) return; // a <select> fires both; `change` applies it
+    if (root) {
+      // The redline is part of the engine preset, so retyping it is a custom engine.
+      if (e.target.classList.contains("gear-input")) markCustom(root, "gearbox");
+      else if (e.target.closest("[data-curve-list]") || e.target.dataset.field === "max_rpm")
+        markCustom(root, "engine");
+    }
+    recompute();
+  });
   setups.addEventListener("change", (e) => {
-    if (e.target.dataset.field === "shift_rpm") onShiftRpmCommit(e.target.closest(".setup"));
+    if (e.target.dataset.preset) applyPreset(e.target.closest(".setup"), e.target);
+    else if (e.target.dataset.field === "shift_rpm") onShiftRpmCommit(e.target.closest(".setup"));
   });
   setups.addEventListener("click", (e) => {
     const root = e.target.closest(".setup");
@@ -1033,6 +1089,7 @@ function wireEvents() {
         if (ratios.length <= MIN_GEARS) return;
         buildGearRows(root, ratios.slice(0, -1));
       }
+      markCustom(root, "gearbox");
     } else if (e.target.closest("[data-add-point]") || e.target.closest("[data-remove-point]")) {
       const points = readCurve(root);
       if (e.target.closest("[data-add-point]")) {
@@ -1045,6 +1102,7 @@ function wireEvents() {
         if (points.length <= MIN_CURVE_POINTS) return;
         buildCurveRows(root, points.slice(0, -1));
       }
+      markCustom(root, "engine");
     } else {
       return;
     }
@@ -1066,9 +1124,13 @@ function wireEvents() {
 }
 
 async function main() {
-  pyodide = await loadPyodide({ indexURL: "pyodide/" });
-
-  const src = await (await fetch("calc.py")).text();
+  const [pyodideInstance, src, presetData] = await Promise.all([
+    loadPyodide({ indexURL: "pyodide/" }),
+    fetch("calc.py").then((r) => r.text()),
+    fetch("presets.json").then((r) => r.json()),
+  ]);
+  pyodide = pyodideInstance;
+  presets = presetData;
   pyodide.runPython(src);
   pyCompute = pyodide.globals.get("compute");
   pyAtSpeed = pyodide.globals.get("at_speed");
@@ -1076,10 +1138,17 @@ async function main() {
   pyPowerAtRpm = pyodide.globals.get("power_at_rpm");
   pyConvertCurve = pyodide.globals.get("convert_curve");
 
+  // A fresh setup is the first preset of each, so `presets.json` holds the
+  // defaults rather than a second copy of them living here.
   for (const key of SETUP_KEYS) {
     buildSetupForm(key);
-    buildGearRows(setupRoot(key), DEFAULT_GEARS);
-    buildCurveRows(setupRoot(key), DEFAULT_TORQUE_CURVE);
+    const root = setupRoot(key);
+    buildGearRows(root, presets.gearboxes[0].gears);
+    buildCurveRows(root, presets.engines[0].torque_curve);
+    field(root, "max_rpm").value = String(presets.engines[0].redline);
+    field(root, "shift_rpm").value = String(presets.engines[0].redline);
+    presetSelect(root, "gearbox").value = "0";
+    presetSelect(root, "engine").value = "0";
   }
   wireEvents();
   recompute();

@@ -129,7 +129,43 @@ main {
   font-size: 0.95rem;
 }
 
-.results h3:first-of-type { margin-top: 1rem; }
+.results > .viz:first-of-type { margin-top: 1rem; }
+
+/* Each chart collapses on its own. <details> gives keyboard support and the
+   open/closed state for free, so there is no script behind this. */
+.viz { margin-top: 1.75rem; }
+
+.viz > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none; /* Firefox */
+}
+
+.viz > summary::-webkit-details-marker { display: none; }
+
+.viz > summary::before {
+  content: "▾";
+  font-size: 0.7rem;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.viz:not([open]) > summary::before { transform: rotate(-90deg); }
+
+.viz > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viz > summary::before { transition: none; }
+}
 
 /* -------------------------------- inputs -------------------------------- */
 .field {
@@ -278,6 +314,9 @@ fieldset.units label {
 }
 
 .gear-buttons button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Names the numbers below it, and reads "Custom" the moment they are edited. */
+.preset { margin-bottom: 0.7rem; font-size: 0.9rem; }
 
 .gear-row {
   display: grid;

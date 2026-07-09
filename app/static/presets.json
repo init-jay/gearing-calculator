@@ -1,0 +1,77 @@
+{
+  "note": "Starting points, not specifications. The gearbox ratios are typical of their type and the torque curves are smooth archetypes rather than measured dyno pulls, so treat any preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline.",
+
+  "gearboxes": [
+    {
+      "name": "Six-speed, stock",
+      "gears": [5.14, 2.83, 1.79, 1.26, 1.0, 0.83]
+    },
+    {
+      "name": "Five-speed, wide ratio",
+      "gears": [3.8, 2.2, 1.4, 1.0, 0.8]
+    },
+    {
+      "name": "Five-speed automatic",
+      "gears": [3.67, 2.0, 1.41, 1.0, 0.74]
+    },
+    {
+      "name": "Six-speed, close ratio",
+      "gears": [3.15, 2.05, 1.48, 1.16, 1.0, 0.85]
+    },
+    {
+      "name": "Seven-speed, close ratio",
+      "gears": [3.4, 2.2, 1.6, 1.28, 1.05, 0.88, 0.75]
+    },
+    {
+      "name": "Four-speed, classic",
+      "gears": [2.95, 1.94, 1.34, 1.0]
+    },
+    {
+      "name": "Six-speed dog box, straight cut",
+      "gears": [2.36, 1.78, 1.42, 1.18, 1.0, 0.88]
+    }
+  ],
+
+  "engines": [
+    {
+      "name": "Naturally aspirated six",
+      "redline": 7000,
+      "torque_curve": [
+        [1000, 180], [2000, 220], [3000, 245], [4000, 255],
+        [5000, 250], [6000, 235], [7000, 205]
+      ]
+    },
+    {
+      "name": "Peaky four, power up top",
+      "redline": 8500,
+      "torque_curve": [
+        [1500, 150], [3000, 175], [4500, 190], [6000, 205],
+        [7000, 210], [8000, 200], [8500, 178]
+      ]
+    },
+    {
+      "name": "Torquey V8, flat and early",
+      "redline": 6000,
+      "torque_curve": [
+        [1000, 400], [2000, 480], [3000, 520], [4000, 530],
+        [5000, 510], [6000, 420]
+      ]
+    },
+    {
+      "name": "Turbo four, broad plateau",
+      "redline": 6500,
+      "torque_curve": [
+        [1500, 180], [2500, 350], [3000, 370], [4500, 370],
+        [5500, 340], [6500, 280]
+      ]
+    },
+    {
+      "name": "Turbo diesel, low and strong",
+      "redline": 4500,
+      "torque_curve": [
+        [1200, 300], [1800, 420], [2500, 440], [3000, 420],
+        [3800, 360], [4500, 290]
+      ]
+    }
+  ]
+}

@@ -11,6 +11,16 @@ The model relates engine RPM to road speed through the drivetrain::
 
 with unit conversions folded in for km/h (tire diameter in mm, the default) and
 mph (tire diameter in inches).
+
+Given an engine torque curve it also computes *tractive effort* — the force the
+tires can push the car with, in each gear, at each road speed::
+
+    axle_torque    = engine_torque * overall_ratio
+    tractive_force = axle_torque / rolling_radius
+
+Plotting that per gear shows why peak power, not peak torque, is what you chase:
+the speed at which one gear's curve drops below the next gear's is the optimal
+upshift, and it is rarely the redline.
 """
 
 from __future__ import annotations
@@ -19,13 +29,25 @@ from dataclasses import dataclass, field
 from math import pi
 
 MM_PER_INCH = 25.4
+INCHES_PER_FOOT = 12.0
+NM_PER_LBFT = 1.3558179483314004
 
 # Imperial constant: mph = rpm * tire_dia_in / (overall_ratio * MPH_CONST).
 # Derivation: inches/hour = rpm * pi * dia * 60; miles/hour divides by 63360,
 # so MPH_CONST = 63360 / (pi * 60) = 336.135...
 MPH_CONST = 63360.0 / (pi * 60.0)
 
+# hp = torque_lbft * rpm / 5252.11...  One horsepower is 33000 ft-lb per minute,
+# and one revolution carries the torque through 2*pi radians.
+HP_CONST = 33000.0 / (2.0 * pi)
+# kW = torque_nm * rpm / 9549.29...  Watts are N.m * rad/s; rpm -> rad/s is
+# 2*pi/60, and dividing by 1000 gives kW, so the constant is 30000 / pi.
+KW_CONST = 30000.0 / pi
+
 Units = str  # "imperial" | "metric"
+
+# (rpm, torque) points. Torque is N.m under metric, lb-ft under imperial.
+TorqueCurve = list  # list[tuple[float, float]]
 
 
 def _validate_units(units: Units) -> None:
@@ -114,6 +136,98 @@ def rpm_at_speed(
     return speed * ratio * 1_000_000.0 / (circ_mm * eff * 60.0)
 
 
+def _rolling_radius(tire: float, units: Units) -> float:
+    """Half the tire diameter, in metres (metric) or feet (imperial).
+
+    Those are the units that make ``axle_torque / radius`` come out in newtons
+    and pounds-force respectively, given torque in N.m and lb-ft.
+    """
+    if tire <= 0:
+        raise ValueError("tire diameter must be positive")
+    if units == "imperial":
+        return tire / 2.0 / INCHES_PER_FOOT
+    return tire / 2.0 / 1000.0
+
+
+def power_at_rpm(torque: float, rpm: float, units: Units = "metric") -> float:
+    """Engine power from torque and speed: kW for metric, hp for imperial.
+
+    Power is torque times angular velocity, so this is not independent data — a
+    torque curve *is* a power curve. That identity is the whole point of the
+    tractive-effort plot, so power is always derived here and never taken as an
+    input.
+    """
+    _validate_units(units)
+    return torque * rpm / (KW_CONST if units == "metric" else HP_CONST)
+
+
+def tractive_effort(
+    torque: float,
+    gear_ratio: float,
+    final_drive: float,
+    transfer: float,
+    tire: float,
+    units: Units = "metric",
+) -> float:
+    """Force at the contact patch: axle torque over the rolling radius.
+
+    Newtons for metric (``torque`` in N.m, ``tire`` in mm), pounds-force for
+    imperial (lb-ft, inches).
+
+    ``slip`` is deliberately absent. A slipping torque converter multiplies
+    torque rather than losing it, and modelling that needs a converter's own
+    K-factor and torque-ratio curves, which this calculator does not ask for.
+    Slip still lowers the road *speed* each force is plotted at, via
+    :func:`speed_at_rpm`, so the modelled power at the wheels drops by the slip
+    fraction — the energy a real converter turns into heat.
+    """
+    _validate_units(units)
+    ratio = overall_ratio(gear_ratio, final_drive, transfer)
+    if ratio <= 0:
+        raise ValueError("overall ratio must be positive")
+    return torque * ratio / _rolling_radius(tire, units)
+
+
+def normalize_curve(points) -> TorqueCurve:
+    """Sort ``(rpm, torque)`` pairs by rpm, dropping non-positive and duplicate ones.
+
+    A later duplicate wins, so an edited row replaces the one it shadows rather
+    than creating a vertical segment that :func:`torque_at_rpm` cannot invert.
+    """
+    clean: dict[float, float] = {}
+    for rpm, torque in points:
+        rpm, torque = float(rpm), float(torque)
+        if rpm > 0 and torque > 0:
+            clean[rpm] = torque
+    return sorted(clean.items())
+
+
+def convert_curve(points, to_units: Units) -> TorqueCurve:
+    """Restate a torque curve in the other unit system. RPM is unit-agnostic."""
+    _validate_units(to_units)
+    factor = NM_PER_LBFT if to_units == "metric" else 1.0 / NM_PER_LBFT
+    return [(rpm, torque * factor) for rpm, torque in points]
+
+
+def torque_at_rpm(curve: TorqueCurve, rpm: float) -> float:
+    """Linear interpolation between the curve's points.
+
+    Outside the curve's range the nearest endpoint is held. Callers sample only
+    inside it (see :meth:`Inputs.curve_span`), so no extrapolated torque ever
+    reaches a plot; the clamp is there so a lone stray lookup cannot explode.
+    """
+    if not curve:
+        raise ValueError("torque curve is empty")
+    if rpm <= curve[0][0]:
+        return curve[0][1]
+    if rpm >= curve[-1][0]:
+        return curve[-1][1]
+    for (r0, t0), (r1, t1) in zip(curve, curve[1:]):
+        if r0 <= rpm <= r1:
+            return t0 + (t1 - t0) * (rpm - r0) / (r1 - r0)
+    raise AssertionError("rpm is inside the curve but matched no segment")
+
+
 @dataclass
 class GearCurve:
     """Speed-vs-RPM samples for a single gear."""
@@ -136,6 +250,32 @@ class ShiftPoint:
 
 
 @dataclass
+class EffortCurve:
+    """Tractive-force-vs-speed samples for a single gear."""
+
+    gear: int
+    ratio: float
+    samples: list[tuple[float, float]] = field(default_factory=list)  # (speed, force)
+
+
+@dataclass
+class Crossover:
+    """Where the next gear starts pulling harder than the current one.
+
+    This is the shift point that maximises acceleration, and it falls at the
+    redline only when the engine is still gaining force right up to it.
+    """
+
+    from_gear: int
+    to_gear: int
+    speed: float
+    rpm: float  # engine rpm in ``from_gear`` at the crossover
+    rpm_after: float  # where it lands in ``to_gear``
+    force: float
+    at_redline: bool  # no crossing below redline: hold the gear to the limiter
+
+
+@dataclass
 class Inputs:
     """All calculator inputs; keeps the JS<->Python boundary explicit."""
 
@@ -147,6 +287,8 @@ class Inputs:
     max_rpm: float = 7000.0
     units: Units = "metric"
     shift_rpm: float | None = None  # None => shift at the redline
+    # Empty => no engine data, and every tractive-effort output comes back empty.
+    torque_curve: TorqueCurve = field(default_factory=list)
 
     def effective_shift_rpm(self) -> float:
         """The shift RPM actually used: defaults to, and never exceeds, redline."""
@@ -155,6 +297,18 @@ class Inputs:
         if self.shift_rpm <= 0:
             raise ValueError("shift_rpm must be positive")
         return min(self.shift_rpm, self.max_rpm)
+
+    def curve_span(self) -> tuple[float, float] | None:
+        """The RPM range over which tractive effort is defined, or ``None``.
+
+        Bounded below by the curve's first point and above by the redline, so the
+        plot neither extrapolates past the data nor runs past the rev limiter.
+        """
+        if len(self.torque_curve) < 2:
+            return None
+        low = self.torque_curve[0][0]
+        high = min(self.torque_curve[-1][0], self.max_rpm)
+        return (low, high) if high > low else None
 
     @classmethod
     def from_dict(cls, data: dict) -> "Inputs":
@@ -169,6 +323,7 @@ class Inputs:
             max_rpm=float(data.get("max_rpm", 7000.0)),
             units=data.get("units", "metric"),
             shift_rpm=None if shift_rpm is None else float(shift_rpm),
+            torque_curve=normalize_curve(data.get("torque_curve") or []),
         )
 
 
@@ -267,24 +422,173 @@ def shift_trace(inputs: Inputs) -> list[tuple[float, float]]:
     return trace
 
 
+def _effort(inputs: Inputs, ratio: float, rpm: float) -> float:
+    """Tractive force in one gear at one engine speed, bound to ``inputs``."""
+    return tractive_effort(
+        torque_at_rpm(inputs.torque_curve, rpm),
+        ratio, inputs.final_drive, inputs.transfer, inputs.tire, inputs.units,
+    )
+
+
+def engine_samples(inputs: Inputs, step: float = 50.0) -> list[tuple[float, float, float]]:
+    """``(rpm, torque, power)`` across the usable rev range.
+
+    Sampled far finer than the entered points because power is quadratic in rpm
+    within each straight torque segment, so a coarse grid would draw the power
+    curve as a visibly wrong polyline.
+    """
+    span = inputs.curve_span()
+    if span is None:
+        return []
+    if step <= 0:
+        raise ValueError("step must be positive")
+
+    low, high = span
+    points: list[float] = []
+    rpm = low
+    while rpm < high:
+        points.append(rpm)
+        rpm += step
+    points.append(high)
+
+    out: list[tuple[float, float, float]] = []
+    for p in points:
+        torque = torque_at_rpm(inputs.torque_curve, p)
+        out.append((p, torque, power_at_rpm(torque, p, inputs.units)))
+    return out
+
+
+def effort_curves(inputs: Inputs, step: float = 50.0) -> list[EffortCurve]:
+    """Tractive force against road speed, one curve per gear.
+
+    Shares :func:`engine_samples`' rpm grid, so every gear's curve is the same
+    torque data mapped through a different ratio — which is exactly the claim the
+    plot is making.
+    """
+    samples = engine_samples(inputs, step)
+    if not samples:
+        return []
+    return [
+        EffortCurve(
+            gear=i,
+            ratio=ratio,
+            samples=[
+                (
+                    _speed(inputs, rpm, ratio),
+                    tractive_effort(
+                        torque, ratio, inputs.final_drive, inputs.transfer, inputs.tire, inputs.units
+                    ),
+                )
+                for rpm, torque, _ in samples
+            ],
+        )
+        for i, ratio in enumerate(inputs.gears, start=1)
+    ]
+
+
+def shift_crossovers(inputs: Inputs, scan: int = 240) -> list[Crossover]:
+    """The optimal upshift for each gear pair: where the next gear pulls harder.
+
+    Both gears can hold a band of road speeds. Across that overlap, define
+    ``d(v) = force_current(v) - force_next(v)``. The current gear starts ahead —
+    it multiplies torque more — and the shift point is the first ``v`` where the
+    next gear catches up.
+
+    ``d`` can cross zero more than once when the torque curve is bumpy, so the
+    overlap is scanned for the *first* sign change and the root is then bisected
+    inside that bracket. Taking the last root, or bisecting the whole interval
+    blindly, would name a shift point past a speed where the taller gear was
+    already winning.
+
+    A pair with ``at_redline`` never crosses: the current gear is still pulling
+    harder when it runs out of revs, so hold it to the limiter.
+    """
+    span = inputs.curve_span()
+    if span is None or len(inputs.gears) < 2:
+        return []
+    low, high = span
+
+    out: list[Crossover] = []
+    for i in range(len(inputs.gears) - 1):
+        current, following = inputs.gears[i], inputs.gears[i + 1]
+
+        def delta(speed: float, a: float = current, b: float = following) -> float:
+            return _effort(inputs, a, _rpm(inputs, speed, a)) - _effort(inputs, b, _rpm(inputs, speed, b))
+
+        def crossover(speed: float, redline: bool, a: float = current, b: float = following) -> Crossover:
+            rpm = min(_rpm(inputs, speed, a), high)
+            return Crossover(
+                from_gear=i + 1,
+                to_gear=i + 2,
+                speed=speed,
+                rpm=rpm,
+                rpm_after=rpm * b / a,
+                force=_effort(inputs, a, rpm),
+                at_redline=redline,
+            )
+
+        # The taller gear cannot run below `low`; the shorter cannot run past `high`.
+        v_low = _speed(inputs, low, following)
+        v_high = _speed(inputs, high, current)
+        if v_low >= v_high or delta(v_high) > 0:
+            # Either the ratios are too far apart to overlap at all, or the current
+            # gear still wins at the limiter. Both mean: shift at the redline.
+            out.append(crossover(v_high, True))
+            continue
+
+        lo, hi = v_low, v_high
+        if delta(v_low) > 0:
+            # Bracket the first sign change before bisecting into it.
+            prev = v_low
+            for k in range(1, scan + 1):
+                v = v_low + (v_high - v_low) * k / scan
+                if delta(v) <= 0:
+                    lo, hi = prev, v
+                    break
+                prev = v
+
+        for _ in range(60):
+            mid = (lo + hi) / 2.0
+            if delta(mid) > 0:
+                lo = mid
+            else:
+                hi = mid
+        out.append(crossover((lo + hi) / 2.0, False))
+
+    return out
+
+
 @dataclass
 class Result:
     """Computed output for a set of inputs."""
 
     units: Units
     speed_unit: str
+    torque_unit: str
+    power_unit: str
+    force_unit: str
     max_rpm: float
     max_speed: float
     curves: list[GearCurve]
     shift_rpm: float
     shifts: list[ShiftPoint]
     trace: list[tuple[float, float]]
+    # All empty when no torque curve was supplied.
+    engine: list[tuple[float, float, float]] = field(default_factory=list)
+    efforts: list[EffortCurve] = field(default_factory=list)
+    crossovers: list[Crossover] = field(default_factory=list)
+    max_force: float = 0.0
+    peak_torque: tuple[float, float] | None = None  # (rpm, torque)
+    peak_power: tuple[float, float] | None = None  # (rpm, power)
 
     def to_dict(self) -> dict:
         """Plain-dict form for easy consumption from JS via ``.toJs()``."""
         return {
             "units": self.units,
             "speed_unit": self.speed_unit,
+            "torque_unit": self.torque_unit,
+            "power_unit": self.power_unit,
+            "force_unit": self.force_unit,
             "max_rpm": self.max_rpm,
             "max_speed": self.max_speed,
             "curves": [
@@ -308,6 +612,25 @@ class Result:
                 for s in self.shifts
             ],
             "trace": self.trace,
+            "engine": self.engine,
+            "efforts": [
+                {"gear": e.gear, "ratio": e.ratio, "samples": e.samples} for e in self.efforts
+            ],
+            "crossovers": [
+                {
+                    "from_gear": c.from_gear,
+                    "to_gear": c.to_gear,
+                    "speed": c.speed,
+                    "rpm": c.rpm,
+                    "rpm_after": c.rpm_after,
+                    "force": c.force,
+                    "at_redline": c.at_redline,
+                }
+                for c in self.crossovers
+            ],
+            "max_force": self.max_force,
+            "peak_torque": self.peak_torque,
+            "peak_power": self.peak_power,
         }
 
 
@@ -317,10 +640,14 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
     Samples each gear from ``step`` up to ``max_rpm`` (inclusive) so the
     frontend can draw one polyline per gear plus a top-speed table, and adds the
     shift points and acceleration trace for the configured shift RPM.
+
+    When ``inputs`` carries a torque curve, the tractive-effort curves, their
+    crossovers, and the engine's own torque/power samples come along too.
     """
     if step <= 0:
         raise ValueError("step must be positive")
-    speed_unit = "mph" if inputs.units == "imperial" else "km/h"
+    metric = inputs.units == "metric"
+    speed_unit = "km/h" if metric else "mph"
 
     # RPM sample points, always including max_rpm as the final point.
     points: list[float] = []
@@ -338,15 +665,30 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
         max_speed = max(max_speed, top)
         curves.append(GearCurve(gear=i, ratio=ratio, top_speed=top, samples=samples))
 
+    engine = engine_samples(inputs)
+    efforts = effort_curves(inputs)
+    max_force = max((f for e in efforts for _, f in e.samples), default=0.0)
+    peak_torque = max(((r, t) for r, t, _ in engine), key=lambda p: p[1], default=None)
+    peak_power = max(((r, p) for r, _, p in engine), key=lambda p: p[1], default=None)
+
     return Result(
         units=inputs.units,
         speed_unit=speed_unit,
+        torque_unit="N·m" if metric else "lb-ft",
+        power_unit="kW" if metric else "hp",
+        force_unit="N" if metric else "lbf",
         max_rpm=inputs.max_rpm,
         max_speed=max_speed,
         curves=curves,
         shift_rpm=inputs.effective_shift_rpm(),
         shifts=shift_points(inputs),
         trace=shift_trace(inputs),
+        engine=engine,
+        efforts=efforts,
+        crossovers=shift_crossovers(inputs),
+        max_force=max_force,
+        peak_torque=peak_torque,
+        peak_power=peak_power,
     )
 
 
@@ -361,8 +703,19 @@ def at_speed(data: dict, speed: float) -> dict:
     Resolves the gear from the shift schedule, then the engine RPM that gear
     needs to hold ``speed``. Together these place the chart marker on the shift
     trace for any speed in the run.
+
+    ``force`` is the tractive effort there, or ``None`` when there is no torque
+    curve or the engine would be outside the range it covers — the latter happens
+    below the curve's first point, where a real car would be slipping the clutch.
     """
     inputs = Inputs.from_dict(data)
     gear = gear_at_speed(inputs, speed)
     ratio = inputs.gears[gear - 1]
-    return {"gear": gear, "ratio": ratio, "rpm": _rpm(inputs, speed, ratio)}
+    rpm = _rpm(inputs, speed, ratio)
+
+    span = inputs.curve_span()
+    force = None
+    if span is not None and span[0] <= rpm <= span[1]:
+        force = _effort(inputs, ratio, rpm)
+
+    return {"gear": gear, "ratio": ratio, "rpm": rpm, "force": force}

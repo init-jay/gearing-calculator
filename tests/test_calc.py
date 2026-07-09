@@ -367,3 +367,229 @@ def test_at_speed_rpm_rises_within_a_gear_and_drops_across_a_shift():
     assert before_hi["rpm"] > before_lo["rpm"]  # climbing in gear
     assert after["gear"] == 2
     assert after["rpm"] < before_hi["rpm"]  # dropped on the shift
+
+
+# --------------------------- tractive effort ------------------------------
+
+# A gentle hump: peak torque at 4000, and torque falls slowly enough past it that
+# power is still climbing at the limiter.
+CURVE = [(1000, 180.0), (2000, 220.0), (3000, 245.0), (4000, 255.0),
+         (5000, 250.0), (6000, 235.0), (7000, 205.0)]
+
+# Torque collapses past 5000, so power peaks around there and falls away after.
+PEAKY = [(1000, 180.0), (3000, 245.0), (4000, 255.0), (5000, 250.0),
+         (6000, 200.0), (7000, 140.0)]
+
+# A close-ratio box: each upshift drops the revs by ~15%, not the ~45% STOCK does.
+CLOSE = [1.5, 1.3, 1.13]
+
+
+def test_power_matches_the_5252_identity():
+    # hp and lb-ft cross at 5252 rpm, by construction of the constant.
+    assert isclose(calc.power_at_rpm(300.0, 5252.113, "imperial"), 300.0, rel_tol=1e-6)
+
+
+def test_power_metric_is_torque_times_angular_velocity():
+    # kW = N.m * (2*pi*rpm/60) / 1000, computed the long way round.
+    from math import pi as _pi
+    torque, rpm = 255.0, 4000.0
+    expected = torque * (2 * _pi * rpm / 60.0) / 1000.0
+    assert isclose(calc.power_at_rpm(torque, rpm, "metric"), expected, rel_tol=1e-12)
+
+
+def test_power_is_unit_system_consistent():
+    # The same physical engine point, stated either way, is the same power.
+    kw = calc.power_at_rpm(255.0, 4000.0, "metric")
+    hp = calc.power_at_rpm(255.0 / calc.NM_PER_LBFT, 4000.0, "imperial")
+    assert isclose(kw, hp * 0.745699872, rel_tol=1e-6)
+
+
+def test_tractive_effort_matches_the_articles_worked_example():
+    # 340 lb-ft through 3:1 and 4:1 is 4080 lb-ft of axle torque. On a 25 in
+    # tire (radius 25/24 ft) that is 4080 / (25/24) = 3916.8 lbf.
+    force = calc.tractive_effort(340.0, 3.0, 4.0, 1.0, 25.0, units="imperial")
+    assert isclose(force, 340.0 * 12.0 / (25.0 / 24.0), rel_tol=1e-12)
+    assert isclose(force, 3916.8, rel_tol=1e-9)
+
+
+def test_tractive_effort_metric_newtons():
+    # 255 N.m * 12 / 0.3 m radius = 10200 N on a 600 mm tire.
+    force = calc.tractive_effort(255.0, 3.0, 4.0, 1.0, 600.0, units="metric")
+    assert isclose(force, 255.0 * 12.0 / 0.3, rel_tol=1e-12)
+
+
+def test_tractive_effort_is_unit_system_consistent():
+    # Same engine, same car, stated metric vs imperial: 1 lbf = 4.4482216 N.
+    metric = calc.tractive_effort(255.0, 3.0, 4.0, 1.0, 635.0, units="metric")
+    imperial = calc.tractive_effort(
+        255.0 / calc.NM_PER_LBFT, 3.0, 4.0, 1.0, 635.0 / calc.MM_PER_INCH, units="imperial"
+    )
+    assert isclose(metric, imperial * 4.4482216152605, rel_tol=1e-9)
+
+
+def test_tractive_effort_falls_as_gears_get_taller():
+    forces = [
+        calc.tractive_effort(255.0, ratio, 3.64, 1.0, 634.3) for ratio in STOCK
+    ]
+    assert forces == sorted(forces, reverse=True)
+
+
+def test_torque_at_rpm_interpolates_linearly():
+    assert isclose(calc.torque_at_rpm(CURVE, 3500.0), 250.0)  # midway 245 -> 255
+    assert isclose(calc.torque_at_rpm(CURVE, 3000.0), 245.0)  # exactly on a point
+
+
+def test_torque_at_rpm_clamps_outside_the_curve():
+    assert calc.torque_at_rpm(CURVE, 10.0) == 180.0
+    assert calc.torque_at_rpm(CURVE, 99999.0) == 205.0
+
+
+def test_normalize_curve_sorts_dedupes_and_drops_nonpositive():
+    got = calc.normalize_curve([(3000, 245), (1000, 180), (1000, 190), (2000, 0), (-5, 100)])
+    assert got == [(1000.0, 190.0), (3000.0, 245.0)]
+
+
+def test_convert_curve_round_trips():
+    there = calc.convert_curve(CURVE, "imperial")
+    back = calc.convert_curve(there, "metric")
+    assert all(isclose(a[1], b[1], rel_tol=1e-12) for a, b in zip(CURVE, back))
+    assert isclose(there[0][1], 180.0 / calc.NM_PER_LBFT, rel_tol=1e-12)
+
+
+def test_curve_span_is_bounded_by_the_redline():
+    inputs = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE, "max_rpm": 5500})
+    assert inputs.curve_span() == (1000.0, 5500.0)
+
+
+def test_curve_span_is_none_without_enough_points():
+    assert calc.Inputs.from_dict({"gears": STOCK}).curve_span() is None
+    assert calc.Inputs.from_dict({"gears": STOCK, "torque_curve": [(1000, 180)]}).curve_span() is None
+
+
+def test_no_torque_curve_means_no_effort_output():
+    result = calc.compute({"gears": STOCK})
+    assert result["efforts"] == []
+    assert result["crossovers"] == []
+    assert result["engine"] == []
+    assert result["max_force"] == 0.0
+    assert result["peak_power"] is None
+
+
+def test_effort_curves_never_leave_the_curve_span():
+    inputs = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE, "max_rpm": 6500})
+    low, high = inputs.curve_span()
+    for curve in calc.effort_curves(inputs):
+        speeds = [s for s, _ in curve.samples]
+        assert isclose(speeds[0], calc._speed(inputs, low, curve.ratio), rel_tol=1e-9)
+        assert isclose(speeds[-1], calc._speed(inputs, high, curve.ratio), rel_tol=1e-9)
+
+
+def test_effort_curve_force_matches_the_formula_pointwise():
+    inputs = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE})
+    first = calc.effort_curves(inputs)[0]
+    speed, force = first.samples[0]
+    rpm = calc._rpm(inputs, speed, first.ratio)
+    expected = calc.torque_at_rpm(CURVE, rpm) * first.ratio * 3.64 / (0.6343 / 2)
+    assert isclose(force, expected, rel_tol=1e-9)
+
+
+def test_peak_power_sits_above_peak_torque_rpm():
+    # Torque falls slowly past its peak, so power keeps climbing for a while.
+    result = calc.compute({"gears": STOCK, "torque_curve": CURVE})
+    assert result["peak_torque"][0] == 4000.0
+    assert result["peak_power"][0] > result["peak_torque"][0]
+
+
+def test_crossovers_are_one_per_gear_pair():
+    result = calc.compute({"gears": STOCK, "torque_curve": CURVE})
+    crossings = result["crossovers"]
+    assert [(c["from_gear"], c["to_gear"]) for c in crossings] == [
+        (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)
+    ]
+
+
+def test_at_the_crossover_both_gears_pull_equally():
+    inputs = calc.Inputs.from_dict({"gears": CLOSE, "torque_curve": PEAKY})
+    for cross in calc.shift_crossovers(inputs):
+        assert not cross.at_redline
+        a = inputs.gears[cross.from_gear - 1]
+        b = inputs.gears[cross.to_gear - 1]
+        fa = calc._effort(inputs, a, calc._rpm(inputs, cross.speed, a))
+        fb = calc._effort(inputs, b, calc._rpm(inputs, cross.speed, b))
+        assert isclose(fa, fb, rel_tol=1e-6)
+
+
+def test_at_the_crossover_power_before_equals_power_after():
+    # Both gears are at the same road speed, and force * speed is power, so equal
+    # force means equal power. The optimal upshift is where the revs you drop to
+    # make exactly as much power as the revs you are leaving.
+    inputs = calc.Inputs.from_dict({"gears": CLOSE, "torque_curve": PEAKY})
+    for cross in calc.shift_crossovers(inputs):
+        before = calc.power_at_rpm(calc.torque_at_rpm(PEAKY, cross.rpm), cross.rpm)
+        after = calc.power_at_rpm(calc.torque_at_rpm(PEAKY, cross.rpm_after), cross.rpm_after)
+        assert isclose(before, after, rel_tol=1e-6)
+
+
+def test_below_the_crossover_the_lower_gear_pulls_harder():
+    inputs = calc.Inputs.from_dict({"gears": CLOSE, "torque_curve": PEAKY})
+    low = inputs.curve_span()[0]
+    for cross in calc.shift_crossovers(inputs):
+        a = inputs.gears[cross.from_gear - 1]
+        b = inputs.gears[cross.to_gear - 1]
+        # Just inside the overlap, before the crossing.
+        v = max(cross.speed * 0.98, calc._speed(inputs, low, b) * 1.001)
+        if v >= cross.speed:
+            continue
+        assert calc._effort(inputs, a, calc._rpm(inputs, v, a)) > calc._effort(
+            inputs, b, calc._rpm(inputs, v, b)
+        )
+
+
+def test_crossover_rpm_after_is_the_ratio_drop():
+    inputs = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE})
+    for cross in calc.shift_crossovers(inputs):
+        a = inputs.gears[cross.from_gear - 1]
+        b = inputs.gears[cross.to_gear - 1]
+        assert isclose(cross.rpm_after, cross.rpm * b / a, rel_tol=1e-12)
+
+
+def test_a_still_climbing_engine_shifts_at_the_redline():
+    # Torque rising all the way to the limiter: the lower gear never gives up.
+    rising = [(1000, 100.0), (7000, 400.0)]
+    inputs = calc.Inputs.from_dict({"gears": [3.0, 2.0], "torque_curve": rising})
+    cross = calc.shift_crossovers(inputs)[0]
+    assert cross.at_redline
+    assert isclose(cross.rpm, 7000.0, rel_tol=1e-9)
+
+
+def test_close_ratios_and_a_peaky_engine_shift_before_the_redline():
+    # Power falls past 5000, and each upshift only drops ~15% of the revs, so the
+    # taller gear catches up while there is still rev range left.
+    inputs = calc.Inputs.from_dict({"gears": CLOSE, "torque_curve": PEAKY})
+    for cross in calc.shift_crossovers(inputs):
+        assert not cross.at_redline
+        assert 1000.0 < cross.rpm < 7000.0
+
+
+def test_wide_ratios_with_a_climbing_engine_shift_at_the_redline():
+    # STOCK's 5.14 -> 2.83 first upshift drops the revs by 45%. Landing at 3854
+    # rpm makes less power than 7000 rpm does on CURVE, whose power is still
+    # rising at the limiter — so every gear is held to the limiter.
+    inputs = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE})
+    crossings = calc.shift_crossovers(inputs)
+    assert all(c.at_redline for c in crossings)
+    assert all(isclose(c.rpm, 7000.0, rel_tol=1e-9) for c in crossings)
+
+
+def test_crossovers_need_two_gears():
+    inputs = calc.Inputs.from_dict({"gears": [3.0], "torque_curve": CURVE})
+    assert calc.shift_crossovers(inputs) == []
+
+
+def test_at_speed_reports_force_only_inside_the_curve():
+    data = {"gears": STOCK, "torque_curve": CURVE}
+    fast = calc.at_speed(data, 100.0)
+    assert fast["force"] is not None and fast["force"] > 0
+    # Crawling: 1st gear at 1 km/h is below the curve's first point.
+    assert calc.at_speed(data, 1.0)["force"] is None
+    assert calc.at_speed({"gears": STOCK}, 100.0)["force"] is None

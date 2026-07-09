@@ -13,6 +13,15 @@ const DEFAULT_GEARS = [5.14, 2.83, 1.79, 1.26, 1.0, 0.83];
 const MAX_GEARS = 8;
 const MIN_GEARS = 1;
 
+// A mild naturally-aspirated six: peak torque at 4000, power still climbing at
+// the limiter. Metric (rpm, N·m); Python restates it when imperial is selected.
+const DEFAULT_TORQUE_CURVE = [
+  [1000, 180], [2000, 220], [3000, 245], [4000, 255],
+  [5000, 250], [6000, 235], [7000, 205],
+];
+const MAX_CURVE_POINTS = 12;
+const MIN_CURVE_POINTS = 2;
+
 const SETUP_KEYS = ["a", "b"];
 
 const $ = (sel) => document.querySelector(sel);
@@ -21,6 +30,8 @@ let pyodide = null;
 let pyCompute = null;
 let pyAtSpeed = null;
 let pyTireDiameter = null;
+let pyPowerAtRpm = null;
+let pyConvertCurve = null;
 
 /** Latest Python result per active setup key, e.g. `{a: {...}, b: {...}}`. */
 let results = {};
@@ -245,6 +256,80 @@ function niceStep(x) {
 }
 
 /**
+ * Clear `svg`, draw its grid, axes and titles, and return the value→pixel maps.
+ *
+ * `y2Max` adds a right-hand axis for a second quantity sharing the plot box. It
+ * gets tick marks and labels but no gridlines: its nice steps land at different
+ * heights from the left axis's, and two interleaved grids read as noise.
+ */
+function drawFrame(svg, { W, H, M, xMax, yMax, xTitle, yTitle, y2Max = 0, y2Title = "" }) {
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+  const right = W - M.right;
+  const bottom = M.top + plotH;
+
+  const xPix = (v) => M.left + (v / xMax) * plotW;
+  const yPix = (v) => bottom - (v / yMax) * plotH;
+  const y2Pix = (v) => bottom - (v / y2Max) * plotH;
+
+  svg.replaceChildren();
+
+  const yStep = niceStep(yMax / 5);
+  for (let v = 0; v <= yMax; v += yStep) {
+    const y = yPix(v);
+    svg.append(svgEl("line", { class: "chart-grid", x1: M.left, y1: y, x2: right, y2: y }));
+    svg.append(
+      svgEl("text", { class: "chart-label", x: M.left - 8, y: y + 4, "text-anchor": "end" },
+        String(Math.round(v)))
+    );
+  }
+
+  const xStep = niceStep(xMax / 6);
+  for (let v = 0; v <= xMax; v += xStep) {
+    const x = xPix(v);
+    svg.append(svgEl("line", { class: "chart-grid", x1: x, y1: M.top, x2: x, y2: bottom }));
+    svg.append(
+      svgEl("text", { class: "chart-label", x, y: bottom + 18, "text-anchor": "middle" },
+        String(Math.round(v)))
+    );
+  }
+
+  svg.append(svgEl("line", { class: "chart-axis", x1: M.left, y1: M.top, x2: M.left, y2: bottom }));
+  svg.append(svgEl("line", { class: "chart-axis", x1: M.left, y1: bottom, x2: right, y2: bottom }));
+  svg.append(
+    svgEl("text", { class: "chart-axis-title", x: M.left + plotW / 2, y: H - 6, "text-anchor": "middle" },
+      xTitle)
+  );
+  svg.append(
+    svgEl("text", {
+      class: "chart-axis-title", x: 14, y: M.top + plotH / 2,
+      "text-anchor": "middle", transform: `rotate(-90 14 ${M.top + plotH / 2})`,
+    }, yTitle)
+  );
+
+  if (y2Max > 0) {
+    svg.append(svgEl("line", { class: "chart-axis", x1: right, y1: M.top, x2: right, y2: bottom }));
+    const step = niceStep(y2Max / 5);
+    for (let v = 0; v <= y2Max; v += step) {
+      const y = y2Pix(v);
+      svg.append(svgEl("line", { class: "chart-axis", x1: right, y1: y, x2: right + 4, y2: y }));
+      svg.append(
+        svgEl("text", { class: "chart-label", x: right + 8, y: y + 4, "text-anchor": "start" },
+          String(Math.round(v)))
+      );
+    }
+    svg.append(
+      svgEl("text", {
+        class: "chart-axis-title", x: W - 6, y: M.top + plotH / 2,
+        "text-anchor": "middle", transform: `rotate(-90 ${W - 6} ${M.top + plotH / 2})`,
+      }, y2Title)
+    );
+  }
+
+  return { xPix, yPix, y2Pix, plotW, plotH, top: M.top, bottom };
+}
+
+/**
  * Plot every setup's acceleration run against road speed.
  *
  * With one setup the gear curves are drawn behind the trace as context. With two
@@ -258,8 +343,6 @@ function renderChart(svg, series, speed) {
   // Every gear curve tops out at max RPM, so the top margin has to clear the
   // gear numbers printed above where each one ends.
   const M = { top: 24, right: 16, bottom: 44, left: 52 };
-  const plotW = W - M.left - M.right;
-  const plotH = H - M.top - M.bottom;
 
   // Road speed runs along X because it increases monotonically through a run,
   // so the shift trace reads left-to-right as a sawtooth. Both axes span the
@@ -267,47 +350,11 @@ function renderChart(svg, series, speed) {
   const xMax = Math.max(...series.map((s) => s.result.max_speed)) * 1.05 || 1;
   const yMax = Math.max(...series.map((s) => s.result.max_rpm));
 
-  const xPix = (spd) => M.left + (spd / xMax) * plotW;
-  const yPix = (rpm) => M.top + plotH - (rpm / yMax) * plotH;
-
-  svg.replaceChildren();
-
-  // Grid + axis labels.
-  const yStep = niceStep(yMax / 5);
-  for (let v = 0; v <= yMax; v += yStep) {
-    const y = yPix(v);
-    svg.append(svgEl("line", { class: "chart-grid", x1: M.left, y1: y, x2: W - M.right, y2: y }));
-    svg.append(
-      svgEl("text", { class: "chart-label", x: M.left - 8, y: y + 4, "text-anchor": "end" },
-        String(Math.round(v)))
-    );
-  }
-
-  const xStep = niceStep(xMax / 6);
-  for (let v = 0; v <= xMax; v += xStep) {
-    const x = xPix(v);
-    svg.append(svgEl("line", { class: "chart-grid", x1: x, y1: M.top, x2: x, y2: M.top + plotH }));
-    svg.append(
-      svgEl("text", { class: "chart-label", x, y: M.top + plotH + 18, "text-anchor": "middle" },
-        String(Math.round(v)))
-    );
-  }
-
-  // Axes.
-  svg.append(svgEl("line", { class: "chart-axis", x1: M.left, y1: M.top, x2: M.left, y2: M.top + plotH }));
-  svg.append(
-    svgEl("line", { class: "chart-axis", x1: M.left, y1: M.top + plotH, x2: W - M.right, y2: M.top + plotH })
-  );
-  svg.append(
-    svgEl("text", { class: "chart-axis-title", x: M.left + plotW / 2, y: H - 6, "text-anchor": "middle" },
-      `Speed (${series[0].result.speed_unit})`)
-  );
-  svg.append(
-    svgEl("text", {
-      class: "chart-axis-title", x: 14, y: M.top + plotH / 2,
-      "text-anchor": "middle", transform: `rotate(-90 14 ${M.top + plotH / 2})`,
-    }, "Engine RPM")
-  );
+  const { xPix, yPix } = drawFrame(svg, {
+    W, H, M, xMax, yMax,
+    xTitle: `Speed (${series[0].result.speed_unit})`,
+    yTitle: "Engine RPM",
+  });
 
   // One polyline per gear. They share a color, so each is named where it ends —
   // at max RPM, spread along the top edge by the gear's top speed.
@@ -374,6 +421,137 @@ function renderLegend(el, series) {
   }
 }
 
+/* ---------------------------- tractive effort ---------------------------- */
+
+const lastSample = (curve) => curve.samples[curve.samples.length - 1];
+
+/**
+ * Force at the contact patch against road speed, one curve per gear.
+ *
+ * This is the plot that makes the torque-vs-power argument concrete: every curve
+ * is the same engine torque scaled by a different ratio, and the point where one
+ * gear's curve dives under the next gear's is the upshift that keeps the most
+ * force under you. Those crossings are marked.
+ */
+function renderEffortChart(svg, series, speed) {
+  const W = 640;
+  const H = 360;
+  const M = { top: 24, right: 16, bottom: 44, left: 62 };
+
+  // The curves stop where the torque curve does, which may be short of redline.
+  const xMax = Math.max(...series.flatMap((s) => s.result.efforts.map((e) => lastSample(e)[0]))) * 1.05;
+  const yMax = Math.max(...series.map((s) => s.result.max_force)) * 1.05;
+
+  const { xPix, yPix } = drawFrame(svg, {
+    W, H, M, xMax, yMax,
+    xTitle: `Speed (${series[0].result.speed_unit})`,
+    yTitle: `Tractive effort (${series[0].result.force_unit})`,
+  });
+
+  series.forEach((s) => {
+    s.result.efforts.forEach((curve) => {
+      const pts = curve.samples.map(([spd, force]) => `${xPix(spd)},${yPix(force)}`).join(" ");
+      svg.append(svgEl("polyline", { class: `chart-effort chart-effort-${s.key}`, points: pts }));
+
+      // Named where it ends — the curves fan out towards higher speeds, so their
+      // tails are the only place a gear number is unambiguous. B's sit below A's.
+      const [spd, force] = lastSample(curve);
+      svg.append(
+        svgEl("text", {
+          class: `chart-effort-label chart-effort-label-${s.key}`,
+          x: xPix(spd), y: yPix(force) + (s.key === "b" ? 14 : -6), "text-anchor": "middle",
+        }, String(curve.gear))
+      );
+    });
+
+    s.result.crossovers.forEach((cross) => {
+      if (cross.at_redline) return; // nothing to mark: the curves never met
+      svg.append(
+        svgEl("circle", {
+          class: "chart-cross", cx: xPix(cross.speed), cy: yPix(cross.force), r: 4,
+        })
+      );
+    });
+
+    // Python's `None` arrives as `undefined`, not `null`. There is no force to
+    // plot when the current speed puts the engine outside the curve's rev range.
+    if (Number.isFinite(s.at.force) && speed <= xMax) {
+      svg.append(
+        svgEl("circle", {
+          class: `chart-marker chart-marker-${s.key}`, cx: xPix(speed), cy: yPix(s.at.force), r: 4,
+        })
+      );
+    }
+  });
+}
+
+/** Torque and its derived power against engine speed, on twinned axes. */
+function renderEngineChart(svg, series) {
+  const W = 640;
+  const H = 300;
+  const M = { top: 16, right: 56, bottom: 44, left: 56 };
+
+  const xMax = Math.max(...series.map((s) => s.result.max_rpm));
+  const yMax = Math.max(...series.flatMap((s) => s.result.engine.map((e) => e[1]))) * 1.15;
+  const y2Max = Math.max(...series.flatMap((s) => s.result.engine.map((e) => e[2]))) * 1.15;
+
+  const { xPix, yPix, y2Pix } = drawFrame(svg, {
+    W, H, M, xMax, yMax, y2Max,
+    xTitle: "Engine RPM",
+    yTitle: `Torque (${series[0].result.torque_unit})`,
+    y2Title: `Power (${series[0].result.power_unit})`,
+  });
+
+  series.forEach((s) => {
+    const torque = s.result.engine.map(([rpm, t]) => `${xPix(rpm)},${yPix(t)}`).join(" ");
+    const power = s.result.engine.map(([rpm, , p]) => `${xPix(rpm)},${y2Pix(p)}`).join(" ");
+    svg.append(svgEl("polyline", { class: `chart-torque chart-torque-${s.key}`, points: torque }));
+    svg.append(svgEl("polyline", { class: `chart-power chart-power-${s.key}`, points: power }));
+
+    const [tRpm, tVal] = s.result.peak_torque;
+    const [pRpm, pVal] = s.result.peak_power;
+    svg.append(svgEl("circle", { class: "chart-peak", cx: xPix(tRpm), cy: yPix(tVal), r: 3.5 }));
+    svg.append(svgEl("circle", { class: "chart-peak", cx: xPix(pRpm), cy: y2Pix(pVal), r: 3.5 }));
+  });
+}
+
+/** Swatch + text, the shape every legend entry takes. */
+function legendEntry(el, cls, text) {
+  const span = document.createElement("span");
+  const sw = document.createElement("i");
+  sw.className = cls;
+  span.append(sw, document.createTextNode(text));
+  el.append(span);
+}
+
+function renderEffortLegend(el, series) {
+  el.replaceChildren();
+  const compare = series.length > 1;
+  series.forEach((s) => {
+    legendEntry(el, `swatch swatch-effort-${s.key}`, compare ? `Setup ${s.label} gears` : "Gear curves");
+  });
+  if (series.some((s) => s.result.crossovers.some((c) => !c.at_redline))) {
+    legendEntry(el, "swatch swatch-dot", "Optimal shift point");
+  }
+}
+
+/** Peak torque and peak power, spelled out under the engine chart. */
+function renderPeaks(el, series) {
+  el.replaceChildren();
+  const compare = series.length > 1;
+  series.forEach((s) => {
+    const r = s.result;
+    const [tRpm, tVal] = r.peak_torque;
+    const [pRpm, pVal] = r.peak_power;
+    const who = compare ? `Setup ${s.label}: ` : "";
+    const span = document.createElement("span");
+    span.textContent =
+      `${who}peak torque ${tVal.toFixed(0)} ${r.torque_unit} @ ${Math.round(tRpm)} rpm` +
+      ` · peak power ${pVal.toFixed(1)} ${r.power_unit} @ ${Math.round(pRpm)} rpm`;
+    el.append(span);
+  });
+}
+
 /* --------------------------------- table --------------------------------- */
 
 /** Append a `<tr>` of text cells, interleaving setups so like rows sit adjacent. */
@@ -426,10 +604,36 @@ function renderShiftTable(tbody, series) {
   }
 }
 
+/** Optimal upshifts, from the tractive-effort crossovers rather than a fixed RPM. */
+function renderCrossTable(tbody, series) {
+  tbody.replaceChildren();
+  const compare = series.length > 1;
+  const rows = Math.max(...series.map((s) => s.result.crossovers.length));
+
+  for (let i = 0; i < rows; i++) {
+    for (const s of series) {
+      const cross = s.result.crossovers[i];
+      if (!cross) continue;
+      const cells = [`${cross.from_gear} → ${cross.to_gear}`];
+      if (compare) cells.push(s.label);
+      cells.push(
+        cross.speed.toFixed(1),
+        // A pair that never crosses is held to the limiter; say so rather than
+        // print the redline as though it were a computed optimum.
+        cross.at_redline ? `${Math.round(cross.rpm)} (redline)` : String(Math.round(cross.rpm)),
+        String(Math.round(cross.rpm_after)),
+        cross.force.toFixed(0)
+      );
+      addRow(tbody, cells, false);
+    }
+  }
+}
+
 /* --------------------------------- inputs -------------------------------- */
 
 const field = (root, name) => root.querySelector(`[data-field="${name}"]`);
 const gearInputs = (root) => [...root.querySelectorAll(".gear-input")];
+const curveRows = (root) => [...root.querySelectorAll(".curve-row")];
 
 const currentUnits = () => document.querySelector('input[name="units"]:checked').value;
 
@@ -460,6 +664,32 @@ function updateTireDiameter(root) {
   field(root, "tire").value = dia.toFixed(units === "metric" ? 1 : 2);
 }
 
+/** The entered torque curve as `[[rpm, torque], ...]`; Python sorts and cleans it. */
+function readCurve(root) {
+  return curveRows(root)
+    .map((row) => [
+      parseFloat(row.querySelector(".curve-rpm").value),
+      parseFloat(row.querySelector(".curve-torque").value),
+    ])
+    .filter(([rpm, torque]) => Number.isFinite(rpm) && Number.isFinite(torque));
+}
+
+/**
+ * Fill in each row's power cell. Power is torque times engine speed, so it is
+ * shown rather than asked for — a row where you could type both would let you
+ * describe an engine that cannot exist.
+ */
+function updatePowerCells(root) {
+  const units = currentUnits();
+  curveRows(root).forEach((row) => {
+    const rpm = parseFloat(row.querySelector(".curve-rpm").value);
+    const torque = parseFloat(row.querySelector(".curve-torque").value);
+    const cell = row.querySelector(".curve-power");
+    const ok = Number.isFinite(rpm) && Number.isFinite(torque) && rpm > 0 && torque > 0;
+    cell.textContent = ok ? pyPowerAtRpm(torque, rpm, units).toFixed(1) : "—";
+  });
+}
+
 function readInputs(root) {
   return {
     gears: gearInputs(root).map((el) => parseFloat(el.value)).filter((v) => Number.isFinite(v) && v > 0),
@@ -470,6 +700,7 @@ function readInputs(root) {
     max_rpm: num(root, "max_rpm", 7000),
     shift_rpm: num(root, "shift_rpm", 7000),
     units: currentUnits(),
+    torque_curve: readCurve(root),
   };
 }
 
@@ -503,11 +734,64 @@ function syncGearButtons(root) {
   root.querySelector("[data-remove-gear]").disabled = n <= MIN_GEARS;
 }
 
+function buildCurveRows(root, points) {
+  const list = root.querySelector("[data-curve-list]");
+  list.replaceChildren();
+  points.forEach(([rpm, torque], i) => {
+    const row = document.createElement("div");
+    row.className = "curve-row";
+
+    const rpmInput = document.createElement("input");
+    rpmInput.type = "number";
+    rpmInput.className = "curve-rpm";
+    rpmInput.step = "100";
+    rpmInput.min = "1";
+    rpmInput.value = String(Math.round(rpm));
+    rpmInput.setAttribute("aria-label", `Point ${i + 1} RPM`);
+
+    const torqueInput = document.createElement("input");
+    torqueInput.type = "number";
+    torqueInput.className = "curve-torque";
+    torqueInput.step = "0.1";
+    torqueInput.min = "0.1";
+    torqueInput.value = String(+torque.toFixed(1));
+    torqueInput.setAttribute("aria-label", `Point ${i + 1} torque`);
+
+    const power = document.createElement("span");
+    power.className = "curve-power";
+
+    row.append(rpmInput, torqueInput, power);
+    list.append(row);
+  });
+  syncCurveButtons(root);
+  updatePowerCells(root);
+}
+
+function syncCurveButtons(root) {
+  const n = curveRows(root).length;
+  root.querySelector("[data-add-point]").disabled = n >= MAX_CURVE_POINTS;
+  root.querySelector("[data-remove-point]").disabled = n <= MIN_CURVE_POINTS;
+}
+
+/** Restate a torque curve in the other unit system, via Python's constant. */
+function convertCurve(points, units) {
+  const pyIn = pyodide.toPy(points);
+  let proxy;
+  try {
+    proxy = pyConvertCurve(pyIn, units);
+    return proxy.toJs();
+  } finally {
+    pyIn.destroy();
+    if (proxy) proxy.destroy();
+  }
+}
+
 /** Seed one setup from another, so comparison starts from a single changed field. */
 function copySetup(from, to) {
   const src = setupRoot(from);
   const dst = setupRoot(to);
   buildGearRows(dst, gearInputs(src).map((el) => parseFloat(el.value) || 1));
+  buildCurveRows(dst, readCurve(src));
   src.querySelectorAll("[data-field]").forEach((el) => {
     field(dst, el.dataset.field).value = el.value;
   });
@@ -534,6 +818,7 @@ function recompute() {
   for (const key of activeKeys()) {
     const root = setupRoot(key);
     updateTireDiameter(root);
+    updatePowerCells(root);
     const inputs = readInputs(root);
     if (inputs.gears.length === 0) return; // mid-edit; keep the last good result
 
@@ -555,6 +840,9 @@ function recompute() {
 
   document.querySelectorAll("[data-speed-unit]").forEach((el) => {
     el.textContent = results.a.speed_unit;
+  });
+  document.querySelectorAll("[data-force-unit]").forEach((el) => {
+    el.textContent = results.a.force_unit;
   });
 
   redraw();
@@ -628,6 +916,19 @@ function redraw() {
   renderLegend($("#legend"), series);
   renderTable($("#table tbody"), series);
   renderShiftTable($("#shift-table tbody"), series);
+
+  // A curve shorter than two points, or one that starts above the redline, leaves
+  // Python with nothing to plot. Hide the whole section rather than draw an empty
+  // frame — and require *every* setup to have one, since the charts overlay them.
+  const hasEngine = series.every((s) => s.result.efforts.length > 0);
+  $("#effort-section").hidden = !hasEngine;
+  if (hasEngine) {
+    renderEffortChart($("#effort-chart"), series, speed);
+    renderEffortLegend($("#effort-legend"), series);
+    renderEngineChart($("#engine-chart"), series);
+    renderPeaks($("#engine-peaks"), series);
+    renderCrossTable($("#cross-table tbody"), series);
+  }
 }
 
 /* ---------------------------------- init --------------------------------- */
@@ -666,11 +967,28 @@ function onUnitChange() {
   const oldMax = topSpeed();
   const oldValue = parseFloat(slider.value);
 
+  const metric = currentUnits() === "metric";
+
   // The tire size itself is unit-agnostic; `recompute` re-derives the diameter
   // in the newly selected unit, so only the label needs updating here.
   document.querySelectorAll("[data-tire-unit]").forEach((el) => {
-    el.textContent = currentUnits() === "metric" ? "mm" : "in";
+    el.textContent = metric ? "mm" : "in";
   });
+  document.querySelectorAll("[data-torque-unit]").forEach((el) => {
+    el.textContent = metric ? "N·m" : "lb-ft";
+  });
+  document.querySelectorAll("[data-power-unit]").forEach((el) => {
+    el.textContent = metric ? "kW" : "hp";
+  });
+
+  // Torque, unlike the tire size, has no unit-agnostic source to re-derive from:
+  // the numbers on screen *are* the data, so they have to be restated in place.
+  // Both setups convert, even the inactive one, or B would silently keep lb-ft.
+  for (const key of SETUP_KEYS) {
+    const root = setupRoot(key);
+    buildCurveRows(root, convertCurve(readCurve(root), currentUnits()));
+  }
+
   recompute();
 
   // Keep the slider on the same physical speed. Both the old and new ceilings
@@ -703,16 +1021,30 @@ function wireEvents() {
   });
   setups.addEventListener("click", (e) => {
     const root = e.target.closest(".setup");
-    const add = e.target.closest("[data-add-gear]");
-    const remove = e.target.closest("[data-remove-gear]");
-    if (!root || (!add && !remove)) return;
+    if (!root) return;
 
-    const ratios = gearInputs(root).map((el) => parseFloat(el.value) || 1);
-    if (add && ratios.length < MAX_GEARS) {
-      const last = ratios[ratios.length - 1] ?? 1;
-      buildGearRows(root, [...ratios, Math.max(0.1, +(last * 0.8).toFixed(2))]);
-    } else if (remove && ratios.length > MIN_GEARS) {
-      buildGearRows(root, ratios.slice(0, -1));
+    if (e.target.closest("[data-add-gear]") || e.target.closest("[data-remove-gear]")) {
+      const ratios = gearInputs(root).map((el) => parseFloat(el.value) || 1);
+      if (e.target.closest("[data-add-gear]")) {
+        if (ratios.length >= MAX_GEARS) return;
+        const last = ratios[ratios.length - 1] ?? 1;
+        buildGearRows(root, [...ratios, Math.max(0.1, +(last * 0.8).toFixed(2))]);
+      } else {
+        if (ratios.length <= MIN_GEARS) return;
+        buildGearRows(root, ratios.slice(0, -1));
+      }
+    } else if (e.target.closest("[data-add-point]") || e.target.closest("[data-remove-point]")) {
+      const points = readCurve(root);
+      if (e.target.closest("[data-add-point]")) {
+        if (points.length >= MAX_CURVE_POINTS) return;
+        // Extend the curve by one more even step, holding the last torque value.
+        const [lastRpm, lastTorque] = points[points.length - 1] ?? [1000, 200];
+        const step = points.length > 1 ? lastRpm - points[points.length - 2][0] : 1000;
+        buildCurveRows(root, [...points, [lastRpm + Math.max(100, step), lastTorque]]);
+      } else {
+        if (points.length <= MIN_CURVE_POINTS) return;
+        buildCurveRows(root, points.slice(0, -1));
+      }
     } else {
       return;
     }
@@ -741,10 +1073,13 @@ async function main() {
   pyCompute = pyodide.globals.get("compute");
   pyAtSpeed = pyodide.globals.get("at_speed");
   pyTireDiameter = pyodide.globals.get("tire_diameter");
+  pyPowerAtRpm = pyodide.globals.get("power_at_rpm");
+  pyConvertCurve = pyodide.globals.get("convert_curve");
 
   for (const key of SETUP_KEYS) {
     buildSetupForm(key);
     buildGearRows(setupRoot(key), DEFAULT_GEARS);
+    buildCurveRows(setupRoot(key), DEFAULT_TORQUE_CURVE);
   }
   wireEvents();
   recompute();

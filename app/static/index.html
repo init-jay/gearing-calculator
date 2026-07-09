@@ -105,6 +105,41 @@
              aria-label="Engine RPM versus road speed by gear"></svg>
         <div id="legend" class="legend"></div>
 
+        <!-- Hidden together whenever the torque curve is too short to plot. -->
+        <div id="effort-section">
+          <h3>Tractive effort</h3>
+          <svg id="effort-chart" class="chart" viewBox="0 0 640 360" role="img"
+               aria-label="Tractive effort versus road speed, by gear"></svg>
+          <div id="effort-legend" class="legend"></div>
+
+          <h3>Engine curve</h3>
+          <svg id="engine-chart" class="chart" viewBox="0 0 640 300" role="img"
+               aria-label="Engine torque and power versus RPM"></svg>
+          <div id="engine-peaks" class="legend"></div>
+
+          <h3>Optimal shift points</h3>
+          <p class="hint">
+            Where the next gear starts pushing harder than the one you are in.
+            Equivalently: where the revs you drop to make as much power as the
+            revs you are leaving.
+          </p>
+          <div class="table-wrap">
+            <table id="cross-table">
+              <thead>
+                <tr>
+                  <th>Shift</th>
+                  <th data-setup-col hidden>Setup</th>
+                  <th>Speed <span data-speed-unit>km/h</span></th>
+                  <th>Upshift at</th>
+                  <th>Lands at</th>
+                  <th>Force <span data-force-unit>N</span></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
         <h3>Top speed per gear</h3>
         <div class="table-wrap">
           <table id="table">
@@ -199,6 +234,24 @@
         </div>
       </div>
       <div data-gear-list></div>
+    </div>
+
+    <div class="gears">
+      <div class="gears-header">
+        <h3>Engine torque</h3>
+        <div class="gear-buttons">
+          <button type="button" data-remove-point title="Remove last point">−</button>
+          <button type="button" data-add-point title="Add a point">+</button>
+        </div>
+      </div>
+      <!-- Power is not an input: it is torque times engine speed, so the third
+           column is derived on every keystroke. -->
+      <div class="curve-head">
+        <span>RPM</span>
+        <span data-torque-unit>N·m</span>
+        <span data-power-unit>kW</span>
+      </div>
+      <div data-curve-list></div>
     </div>
   </template>
 

@@ -292,6 +292,41 @@ fieldset.units label {
   color: var(--muted);
 }
 
+/* ---------------------------- engine curve ------------------------------ */
+.curve-head,
+.curve-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 4.2rem;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.curve-head {
+  margin-bottom: 0.35rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.curve-head span:last-child,
+.curve-power { text-align: right; }
+
+.curve-row { margin-bottom: 0.45rem; }
+
+/* Derived, not entered — same dashed-and-muted treatment as the tire diameter. */
+.curve-power {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.hint {
+  margin: -0.4rem 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 /* -------------------------------- gauges -------------------------------- */
 .gauges {
   position: relative;
@@ -480,6 +515,38 @@ fieldset.units label {
 
 .chart-shift { fill: var(--text); opacity: 0.65; }
 
+/* ------------------------- tractive effort chart ------------------------- */
+/* Here the gear curves *are* the subject, so they keep the setup's colour
+   rather than receding to gray the way they do on the RPM chart. */
+.chart-effort {
+  fill: none;
+  stroke: var(--dial-amber);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+
+.chart-effort-b { stroke: var(--dial-blue); stroke-dasharray: 6 4; }
+.chart-effort-label { fill: var(--dial-amber); font-size: 10px; font-weight: 600; }
+.chart-effort-label-b { fill: var(--dial-blue); }
+
+/* The crossings. Ringed in the panel colour so they read on top of the curves. */
+.chart-cross { fill: var(--text); stroke: var(--panel); stroke-width: 1.5; }
+
+.chart-torque { fill: none; stroke: var(--dial-amber); stroke-width: 2; }
+.chart-torque-b { stroke: var(--dial-blue); }
+/* Dashed because it is derived from the solid line beside it, not measured. */
+.chart-power {
+  fill: none;
+  stroke: var(--dial-amber);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  opacity: 0.75;
+}
+
+.chart-power-b { stroke: var(--dial-blue); }
+.chart-peak { fill: var(--text); opacity: 0.7; }
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -500,6 +567,17 @@ fieldset.units label {
 /* Mirror the traces so each legend entry is recognisable. */
 .legend .swatch-trace { background: var(--dial-amber); }
 .legend .swatch-trace-b { background: var(--dial-blue); }
+.legend .swatch-effort-a { background: var(--dial-amber); }
+.legend .swatch-effort-b { background: var(--dial-blue); }
+
+/* Round, to match the crossover markers rather than the line swatches. */
+.legend .swatch-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--text);
+}
+
 .legend-note { font-style: italic; opacity: 0.8; }
 
 /* -------------------------------- table --------------------------------- */

@@ -237,6 +237,13 @@ def test_defaults_are_metric():
     assert calc.compute({"gears": [1.0]})["speed_unit"] == "km/h"
 
 
+def test_default_final_drive():
+    assert calc.Inputs(gears=[1.0]).final_drive == 3.64
+    assert calc.compute({"gears": [1.0]})["curves"][0]["ratio"] == 1.0
+    # from_dict must use the same default as the dataclass.
+    assert calc.Inputs.from_dict({"gears": [1.0]}).final_drive == 3.64
+
+
 def test_tire_diameter_known_sizes():
     # 225/45R17: 17 in rim = 431.8 mm, plus two 101.25 mm sidewalls.
     assert isclose(calc.tire_diameter(225, 45, 17), 634.3, abs_tol=1e-9)
@@ -265,3 +272,98 @@ def test_tire_diameter_rejects_bad_input():
     for bad in ((0, 45, 17), (225, 0, 17), (225, 45, 0), (-225, 45, 17)):
         with pytest.raises(ValueError):
             calc.tire_diameter(*bad)
+
+
+# ------------------------------ gear at speed ------------------------------
+
+STOCK = [5.14, 2.83, 1.79, 1.26, 1.0, 0.83]
+
+
+def test_gear_at_speed_walks_up_through_the_gears():
+    inputs = calc.Inputs(gears=STOCK)
+    shifts = calc.shift_points(inputs)
+
+    assert calc.gear_at_speed(inputs, 0.0) == 1
+    # Just below the first shift you are still in first.
+    assert calc.gear_at_speed(inputs, shifts[0].speed - 0.001) == 1
+    # Beyond the last shift you are in top gear and stay there.
+    assert calc.gear_at_speed(inputs, shifts[-1].speed + 1) == len(STOCK)
+    assert calc.gear_at_speed(inputs, 10_000) == len(STOCK)
+
+
+def test_gear_at_exactly_the_shift_speed_is_the_next_gear():
+    # At the shift speed the shift has just happened.
+    inputs = calc.Inputs(gears=STOCK)
+    for shift in calc.shift_points(inputs):
+        assert calc.gear_at_speed(inputs, shift.speed) == shift.to_gear
+
+
+def test_gear_at_speed_single_gear_and_empty():
+    assert calc.gear_at_speed(calc.Inputs(gears=[3.0]), 500.0) == 1
+    with pytest.raises(ValueError):
+        calc.gear_at_speed(calc.Inputs(gears=[]), 10.0)
+
+
+def test_lower_shift_rpm_moves_gear_boundaries_to_lower_speeds():
+    late = calc.Inputs(gears=STOCK, shift_rpm=7000)
+    early = calc.Inputs(gears=STOCK, shift_rpm=4000)
+    for a, b in zip(calc.shift_points(late), calc.shift_points(early)):
+        assert b.speed < a.speed
+    # A speed that is still 1st gear when winding out is already 2nd if you
+    # short-shift.
+    speed = calc.shift_points(early)[0].speed + 1
+    assert calc.gear_at_speed(early, speed) == 2
+    assert calc.gear_at_speed(late, speed) == 1
+
+
+# -------------------------------- at_speed ---------------------------------
+
+
+def test_at_speed_lands_exactly_on_each_shift_point():
+    # The property that puts the chart marker *on* the trace: at a shift speed,
+    # at_speed must report the gear just engaged, at that shift's rpm_after.
+    data = {"gears": STOCK}
+    inputs = calc.Inputs.from_dict(data)
+    for shift in calc.shift_points(inputs):
+        got = calc.at_speed(data, shift.speed)
+        assert got["gear"] == shift.to_gear
+        assert isclose(got["rpm"], shift.rpm_after, rel_tol=1e-9)
+
+
+def test_at_speed_rpm_matches_rpm_at_speed_for_the_derived_gear():
+    data = {"gears": STOCK, "slip": 0.05}
+    inputs = calc.Inputs.from_dict(data)
+    for speed in (5.0, 30.0, 70.0, 120.0, 200.0, 260.0):
+        got = calc.at_speed(data, speed)
+        assert got["ratio"] == STOCK[got["gear"] - 1]
+        expected = calc.rpm_at_speed(
+            speed, got["ratio"], inputs.final_drive, inputs.transfer,
+            inputs.tire, inputs.slip, inputs.units,
+        )
+        assert isclose(got["rpm"], expected, rel_tol=1e-12)
+
+
+def test_at_speed_picks_the_same_gear_in_either_unit_system():
+    # 100 km/h and 62.137 mph are the same road speed, so the same gear.
+    kmh = calc.at_speed({"gears": STOCK, "tire": 635.0}, 100.0)
+    mph = calc.at_speed(
+        {"gears": STOCK, "tire": 25.0, "units": "imperial"}, 100.0 / 1.609344
+    )
+    assert kmh["gear"] == mph["gear"]
+    assert isclose(kmh["rpm"], mph["rpm"], rel_tol=1e-9)
+
+
+def test_at_speed_rpm_rises_within_a_gear_and_drops_across_a_shift():
+    # The sawtooth, sampled: rpm climbs with speed until a shift, then falls.
+    data = {"gears": STOCK}
+    inputs = calc.Inputs.from_dict(data)
+    boundary = calc.shift_points(inputs)[0].speed
+
+    before_lo = calc.at_speed(data, boundary * 0.5)
+    before_hi = calc.at_speed(data, boundary - 0.001)
+    after = calc.at_speed(data, boundary)
+
+    assert before_lo["gear"] == before_hi["gear"] == 1
+    assert before_hi["rpm"] > before_lo["rpm"]  # climbing in gear
+    assert after["gear"] == 2
+    assert after["rpm"] < before_hi["rpm"]  # dropped on the shift

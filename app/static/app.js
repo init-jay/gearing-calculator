@@ -5,7 +5,7 @@
  * this file only gathers inputs, calls into Python, and draws SVG.
  */
 
-const DEFAULT_GEARS = [3.6, 2.1, 1.4, 1.0, 0.8, 0.65];
+const DEFAULT_GEARS = [5.14, 2.83, 1.79, 1.26, 1.0, 0.83];
 const MAX_GEARS = 8;
 const MIN_GEARS = 1;
 
@@ -19,7 +19,7 @@ const gearColor = (i) => GEAR_COLORS[i % GEAR_COLORS.length];
 
 let pyodide = null;
 let pyCompute = null;
-let pySpeedAtRpm = null;
+let pyAtSpeed = null;
 let pyTireDiameter = null;
 let lastResult = null;
 
@@ -137,11 +137,13 @@ function renderChart(svg, result, current) {
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom;
 
-  const xMax = result.max_rpm;
-  const yMax = result.max_speed * 1.05 || 1;
+  // Road speed runs along X because it increases monotonically through a run,
+  // so the shift trace reads left-to-right as a sawtooth.
+  const xMax = result.max_speed * 1.05 || 1;
+  const yMax = result.max_rpm;
 
-  const xPix = (rpm) => M.left + (rpm / xMax) * plotW;
-  const yPix = (spd) => M.top + plotH - (spd / yMax) * plotH;
+  const xPix = (spd) => M.left + (spd / xMax) * plotW;
+  const yPix = (rpm) => M.top + plotH - (rpm / yMax) * plotH;
 
   svg.replaceChildren();
 
@@ -173,38 +175,38 @@ function renderChart(svg, result, current) {
   );
   svg.append(
     svgEl("text", { class: "chart-axis-title", x: M.left + plotW / 2, y: H - 6, "text-anchor": "middle" },
-      "Engine RPM")
+      `Speed (${result.speed_unit})`)
   );
   svg.append(
     svgEl("text", {
       class: "chart-axis-title", x: 14, y: M.top + plotH / 2,
       "text-anchor": "middle", transform: `rotate(-90 14 ${M.top + plotH / 2})`,
-    }, `Speed (${result.speed_unit})`)
+    }, "Engine RPM")
   );
 
   // One polyline per gear.
   result.curves.forEach((curve, i) => {
-    const pts = curve.samples.map(([rpm, spd]) => `${xPix(rpm)},${yPix(spd)}`).join(" ");
+    const pts = curve.samples.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
     svg.append(svgEl("polyline", { class: "chart-line", points: pts, stroke: gearColor(i) }));
   });
 
-  // The acceleration run: up each gear to the shift RPM, then across to the
-  // next gear at the same road speed. Drawn over the curves it annotates.
+  // The acceleration run: up each gear to the shift RPM, then straight down to
+  // the next gear at the same road speed. Drawn over the curves it annotates.
   if (result.trace.length) {
-    const pts = result.trace.map(([rpm, spd]) => `${xPix(rpm)},${yPix(spd)}`).join(" ");
+    const pts = result.trace.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
     svg.append(svgEl("polyline", { class: "chart-trace", points: pts }));
     result.shifts.forEach((s) => {
       svg.append(
-        svgEl("circle", { class: "chart-shift", cx: xPix(result.shift_rpm), cy: yPix(s.speed), r: 3 })
+        svgEl("circle", { class: "chart-shift", cx: xPix(s.speed), cy: yPix(result.shift_rpm), r: 3 })
       );
     });
   }
 
-  // Marker for the currently selected gear + RPM.
-  if (current && current.rpm > 0 && current.rpm <= xMax) {
+  // Marker for the current speed, in whichever gear the shift schedule puts it.
+  if (current && current.speed >= 0 && current.speed <= xMax) {
     svg.append(
       svgEl("circle", {
-        class: "chart-marker", cx: xPix(current.rpm), cy: yPix(current.speed), r: 4,
+        class: "chart-marker", cx: xPix(current.speed), cy: yPix(current.rpm), r: 4,
         fill: gearColor(current.gearIndex),
       })
     );
@@ -301,7 +303,7 @@ function updateTireDiameter() {
 function readInputs() {
   return {
     gears: gearInputs().map((el) => parseFloat(el.value)).filter((v) => Number.isFinite(v) && v > 0),
-    final_drive: num("#final_drive", 3.9),
+    final_drive: num("#final_drive", 3.64),
     transfer: num("#transfer", 1.0),
     tire: num("#tire", 634.3),
     slip: num("#slip", 0) / 100,
@@ -344,20 +346,6 @@ function syncGearButtons() {
   $("#remove-gear").disabled = n <= MIN_GEARS;
 }
 
-function syncGearSelect() {
-  const select = $("#cur_gear");
-  const n = gearInputs().length;
-  const prev = parseInt(select.value, 10);
-  select.replaceChildren();
-  for (let i = 1; i <= n; i++) {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = String(i);
-    select.append(opt);
-  }
-  select.value = String(prev >= 1 && prev <= n ? prev : Math.min(n, 1));
-}
-
 /* ------------------------------ python bridge ---------------------------- */
 
 /** Recompute all gear curves via Python, then redraw everything. */
@@ -365,10 +353,6 @@ function recompute() {
   updateTireDiameter();
   const inputs = readInputs();
   if (inputs.gears.length === 0) return;
-
-  const slider = $("#cur_rpm");
-  slider.max = String(inputs.max_rpm);
-  if (parseFloat(slider.value) > inputs.max_rpm) slider.value = String(inputs.max_rpm);
 
   // Advertise the ceiling, but don't rewrite the value here: `recompute` runs on
   // every keystroke, and a half-typed redline ("8" of "8000") would clobber it.
@@ -386,6 +370,12 @@ function recompute() {
     if (proxy) proxy.destroy();
   }
 
+  // The speed slider's ceiling is the top gear's top speed, so it can only be
+  // set once `lastResult` is fresh. `floor` keeps the slider inside the plot.
+  const slider = $("#cur_speed");
+  slider.max = String(Math.floor(lastResult.max_speed));
+  if (parseFloat(slider.value) > lastResult.max_speed) slider.value = slider.max;
+
   document.querySelectorAll("[data-speed-unit]").forEach((el) => {
     el.textContent = lastResult.speed_unit;
   });
@@ -393,21 +383,31 @@ function recompute() {
   redraw();
 }
 
-/** Redraw gauges/chart/table from `lastResult` + the current RPM & gear. */
+/** Redraw gauges/chart/table from `lastResult` + the current road speed. */
 function redraw() {
   if (!lastResult) return;
   const inputs = readInputs();
-  const gearNum = parseInt($("#cur_gear").value, 10) || 1;
+  if (inputs.gears.length === 0) return;
+
+  const speed = parseFloat($("#cur_speed").value);
+  $("#cur_speed_out").textContent = String(Math.round(speed));
+
+  // Python decides which gear the shift schedule puts us in, and the rpm that
+  // gear needs to hold this speed — so the marker always lands on the trace.
+  const pyIn = pyodide.toPy(inputs);
+  let proxy, at;
+  try {
+    proxy = pyAtSpeed(pyIn, speed);
+    at = proxy.toJs({ dict_converter: Object.fromEntries });
+  } finally {
+    pyIn.destroy();
+    if (proxy) proxy.destroy();
+  }
+
+  const gearNum = at.gear;
   const gearIndex = gearNum - 1;
-  const ratio = inputs.gears[gearIndex];
-  if (ratio === undefined) return;
-
-  const rpm = parseFloat($("#cur_rpm").value);
-  $("#cur_rpm_out").textContent = String(Math.round(rpm));
-
-  const speed = pySpeedAtRpm(
-    rpm, ratio, inputs.final_drive, inputs.transfer, inputs.tire, inputs.slip, inputs.units
-  );
+  const rpm = at.rpm;
+  $("#cur_gear").textContent = String(gearNum);
 
   const tachScale = gaugeScale(inputs.max_rpm);
   renderGauge($("#tach"), {
@@ -430,11 +430,25 @@ function redraw() {
 /* ---------------------------------- init --------------------------------- */
 
 function onUnitChange() {
+  const slider = $("#cur_speed");
+  const oldMax = lastResult ? lastResult.max_speed : 0;
+  const oldValue = parseFloat(slider.value);
+
   // The tire size itself is unit-agnostic; `recompute` re-derives the diameter
   // in the newly selected unit, so only the label needs updating here.
   document.querySelector("[data-tire-unit]").textContent =
     currentUnits() === "metric" ? "mm" : "in";
   recompute();
+
+  // Keep the slider on the same physical speed. Both the old and new top speeds
+  // scale by the same factor across a unit change, so their ratio converts the
+  // value exactly — no hardcoded 1.609344. Scale from the pre-clamp value, since
+  // `recompute` may have pulled it down to the new (smaller) ceiling.
+  if (oldMax > 0 && Number.isFinite(oldValue)) {
+    const scaled = Math.round(oldValue * (lastResult.max_speed / oldMax));
+    slider.value = String(Math.min(scaled, parseFloat(slider.max)));
+    redraw();
+  }
 }
 
 /** Once the user commits a shift RPM, pull it back under the redline. */
@@ -461,16 +475,14 @@ function wireEvents() {
     el.addEventListener("change", onUnitChange)
   );
 
-  // These only move the needles/marker; no need to recompute the curves.
-  $("#cur_rpm").addEventListener("input", redraw);
-  $("#cur_gear").addEventListener("change", redraw);
+  // Only moves the needles/marker along the trace; the curves are unchanged.
+  $("#cur_speed").addEventListener("input", redraw);
 
   $("#add-gear").addEventListener("click", () => {
     const ratios = gearInputs().map((el) => parseFloat(el.value) || 1);
     if (ratios.length >= MAX_GEARS) return;
     const last = ratios[ratios.length - 1] ?? 1;
     buildGearRows([...ratios, Math.max(0.1, +(last * 0.8).toFixed(2))]);
-    syncGearSelect();
     recompute();
   });
 
@@ -478,7 +490,6 @@ function wireEvents() {
     const ratios = gearInputs().map((el) => parseFloat(el.value) || 1);
     if (ratios.length <= MIN_GEARS) return;
     buildGearRows(ratios.slice(0, -1));
-    syncGearSelect();
     recompute();
   });
 }
@@ -489,11 +500,10 @@ async function main() {
   const src = await (await fetch("calc.py")).text();
   pyodide.runPython(src);
   pyCompute = pyodide.globals.get("compute");
-  pySpeedAtRpm = pyodide.globals.get("speed_at_rpm");
+  pyAtSpeed = pyodide.globals.get("at_speed");
   pyTireDiameter = pyodide.globals.get("tire_diameter");
 
   buildGearRows(DEFAULT_GEARS);
-  syncGearSelect();
   wireEvents();
   recompute();
 

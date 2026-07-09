@@ -61,7 +61,7 @@
 
         <div class="field">
           <label for="final_drive">Final drive (diff) ratio</label>
-          <input type="number" id="final_drive" value="3.9" min="0.01" step="0.01" />
+          <input type="number" id="final_drive" value="3.64" min="0.01" step="0.01" />
         </div>
 
         <div class="field">
@@ -109,18 +109,21 @@
 
         <div class="controls">
           <div class="field">
-            <label for="cur_rpm">Current RPM <output id="cur_rpm_out">3000</output></label>
-            <input type="range" id="cur_rpm" min="0" max="7000" step="50" value="3000" />
+            <label for="cur_speed">
+              Current speed <output id="cur_speed_out">100</output>
+              <span class="unit" data-speed-unit>km/h</span>
+            </label>
+            <input type="range" id="cur_speed" min="0" max="277" step="1" value="100" />
           </div>
           <div class="field">
             <label for="cur_gear">Gear</label>
-            <select id="cur_gear"></select>
+            <output id="cur_gear" class="gear-readout">1</output>
           </div>
         </div>
 
-        <h3>Speed vs RPM</h3>
+        <h3>RPM vs Speed</h3>
         <svg id="chart" class="chart" viewBox="0 0 640 360" role="img"
-             aria-label="Speed versus RPM by gear"></svg>
+             aria-label="Engine RPM versus road speed by gear"></svg>
         <div id="legend" class="legend"></div>
 
         <h3>Top speed per gear</h3>

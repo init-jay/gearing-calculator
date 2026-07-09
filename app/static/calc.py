@@ -140,7 +140,7 @@ class Inputs:
     """All calculator inputs; keeps the JS<->Python boundary explicit."""
 
     gears: list[float]
-    final_drive: float = 3.9
+    final_drive: float = 3.64
     transfer: float = 1.0
     tire: float = DEFAULT_TIRE_MM
     slip: float = 0.0
@@ -162,7 +162,7 @@ class Inputs:
         shift_rpm = data.get("shift_rpm")
         return cls(
             gears=[float(g) for g in data["gears"] if float(g) > 0],
-            final_drive=float(data.get("final_drive", 3.9)),
+            final_drive=float(data.get("final_drive", 3.64)),
             transfer=float(data.get("transfer", 1.0)),
             tire=float(data.get("tire", DEFAULT_TIRE_MM)),
             slip=float(data.get("slip", 0.0)),
@@ -176,6 +176,13 @@ def _speed(inputs: Inputs, rpm: float, ratio: float) -> float:
     """``speed_at_rpm`` with the drivetrain arguments bound to ``inputs``."""
     return speed_at_rpm(
         rpm, ratio, inputs.final_drive, inputs.transfer, inputs.tire, inputs.slip, inputs.units
+    )
+
+
+def _rpm(inputs: Inputs, speed: float, ratio: float) -> float:
+    """``rpm_at_speed`` with the drivetrain arguments bound to ``inputs``."""
+    return rpm_at_speed(
+        speed, ratio, inputs.final_drive, inputs.transfer, inputs.tire, inputs.slip, inputs.units
     )
 
 
@@ -214,6 +221,22 @@ def shift_points(inputs: Inputs) -> list[ShiftPoint]:
             )
         )
     return points
+
+
+def gear_at_speed(inputs: Inputs, speed: float) -> int:
+    """The 1-based gear the car is in at ``speed``, following the shift schedule.
+
+    You are in the first gear whose upshift has not happened yet. At exactly a
+    shift speed the shift has *just* happened, so the next gear is the answer —
+    which is what puts the engine at that shift's ``rpm_after`` rather than at
+    ``shift_rpm``.
+    """
+    if not inputs.gears:
+        raise ValueError("need at least one gear")
+    for shift in shift_points(inputs):
+        if speed < shift.speed:
+            return shift.from_gear
+    return len(inputs.gears)
 
 
 def shift_trace(inputs: Inputs) -> list[tuple[float, float]]:
@@ -330,3 +353,16 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
 def compute(data: dict, step: float = 250.0) -> dict:
     """Convenience entrypoint for the browser: dict in, dict out."""
     return gear_table(Inputs.from_dict(data), step=step).to_dict()
+
+
+def at_speed(data: dict, speed: float) -> dict:
+    """Where the drivetrain sits at ``speed``: dict in, dict out.
+
+    Resolves the gear from the shift schedule, then the engine RPM that gear
+    needs to hold ``speed``. Together these place the chart marker on the shift
+    trace for any speed in the run.
+    """
+    inputs = Inputs.from_dict(data)
+    gear = gear_at_speed(inputs, speed)
+    ratio = inputs.gears[gear - 1]
+    return {"gear": gear, "ratio": ratio, "rpm": _rpm(inputs, speed, ratio)}

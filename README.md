@@ -5,8 +5,11 @@ A modern vehicle gearing analyzer, inspired by
 
 Relates engine RPM to road speed through the drivetrain — transmission gear
 ratio × final drive × transfer case, with tire diameter and torque-converter
-slip — and shows a tachometer, speedometer, a speed-vs-RPM chart per gear, and a
-top-speed table.
+slip — and shows a tachometer, speedometer, a chart of engine RPM against road
+speed with one line per gear, a top-speed table, and a shift-point table.
+
+Drag the speed slider to walk a whole acceleration run: the gear follows the
+shift schedule and the tachometer sawtooths as each shift lands.
 
 The gearing math is written in Python and **runs in the browser** via
 [Pyodide](https://pyodide.org) (WebAssembly). The FastAPI server only serves
@@ -95,5 +98,7 @@ and is identical in metric and imperial. Only the road speed at which the shift
 happens depends on the rest of the drivetrain.
 
 The chart overlays a **shift trace** — the engine's path through a full
-acceleration run, climbing each gear to the shift RPM and then jumping across to
-the next gear at the same road speed.
+acceleration run, climbing each gear to the shift RPM and then dropping straight
+down to the next gear at the same road speed. Plotting RPM against speed (rather
+than the reverse) makes this a sawtooth: road speed only ever increases through a
+run, so it parameterises the whole path, while a given RPM occurs once per gear.

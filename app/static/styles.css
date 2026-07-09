@@ -276,6 +276,19 @@ fieldset.units label {
   margin-top: 0.75rem;
 }
 
+/* The gear is derived from the shift schedule rather than chosen, so it gets
+   the same dashed treatment as the derived tire diameter — but keeps the box
+   the old <select> had, so the control row stays aligned. */
+.gear-readout {
+  display: block;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
 /* -------------------------------- chart --------------------------------- */
 .chart {
   width: 100%;

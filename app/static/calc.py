@@ -331,12 +331,17 @@ class Accel:
     different answer from :attr:`Result.acceleration` being ``None``, which means
     there was no torque curve to run at all — "too slow to get there" and "no
     engine data" must not collapse into the same value.
+
+    The two traction fields describe the whole rev range, not just the run to
+    ``target_speed``, and can therefore name a speed above it.
     """
 
     target_speed: float  # the benchmark, in display units
     time: float | None  # seconds, or None when the target is never reached
     shifts: int  # upshifts below the target; time - shifts * shift_time is engine-only
-    traction_limited_to: float  # speed below which grip capped the force, 0.0 if never
+    # The fastest grip still caps the force, 0.0 if never. Not a claim that every
+    # slower speed is capped: from rest a soft engine may not break traction at all.
+    traction_limited_to: float
     traction_limited_gear: int  # the gear it was still grip-capped in, 0 if never
 
 
@@ -353,7 +358,7 @@ class Inputs:
     units: Units = "metric"
     shift_rpm: float | None = None  # None => shift at the redline
     weight: float = 1400.0  # kg under metric, lb under imperial
-    grip: float = 1.0  # lateral G the tires hold; dimensionless, so never converted
+    mu: float = 1.0  # coefficient of static friction, rubber on road; a pure ratio
     shift_time: float = 0.3  # seconds of dead time per upshift
     # Empty => no engine data, and every tractive-effort output comes back empty.
     torque_curve: TorqueCurve = field(default_factory=list)
@@ -392,7 +397,7 @@ class Inputs:
             units=data.get("units", "metric"),
             shift_rpm=None if shift_rpm is None else float(shift_rpm),
             weight=float(data.get("weight", 1400.0)),
-            grip=float(data.get("grip", 1.0)),
+            mu=float(data.get("mu", 1.0)),
             shift_time=float(data.get("shift_time", 0.3)),
             torque_curve=normalize_curve(data.get("torque_curve") or []),
         )
@@ -661,6 +666,131 @@ def shift_crossovers(inputs: Inputs, scan: int = 240) -> list[Crossover]:
     return out
 
 
+def normal_force(inputs: Inputs) -> float:
+    """The load pressing the driven tires into the road, in the selected unit's force terms.
+
+    Newtons under metric (mass in kg, so weigh it), pounds-force under imperial —
+    where no conversion is needed, because a pound-mass *is* a pound-force under
+    standard gravity.
+
+    The whole vehicle weight is taken as load on the driven axle. The calculator
+    asks for neither weight distribution nor centre-of-gravity height, so it can
+    model neither the static split nor the rearward transfer that squats a car as
+    it launches. This is therefore the optimistic bound, and the single place a
+    real load model would replace.
+    """
+    if inputs.weight <= 0:
+        raise ValueError("weight must be positive")
+    return inputs.weight * STANDARD_GRAVITY if inputs.units == "metric" else inputs.weight
+
+
+def traction_limit(inputs: Inputs) -> float:
+    """The most force the tires can transmit before they break away: ``mu * N``.
+
+    Coulomb's law of static friction, with ``mu`` the coefficient between rubber
+    and road and ``N`` the :func:`normal_force` on the driven tires. The answer is
+    in newtons under metric and pounds-force under imperial.
+
+    Constant with road speed — neither ``mu`` nor ``N`` depends on how fast the
+    tires are turning — which is why it plots as a horizontal line across the
+    tractive-effort chart. Any part of a gear's curve above it is force the engine
+    makes and the tires cannot use.
+
+    That ``mu`` exceeds 1 for a performance tire is not an error. Coulomb friction
+    is a model of two rigid surfaces sliding; rubber also keys into road texture
+    and adheres to it, and those contributions are not proportional to load. The
+    coefficient is fitted to what tires actually do, so 1.0 for a road tire and
+    1.4 for a slick are ordinary. What the model keeps is the part that matters
+    here: the limit is proportional to load, and independent of speed.
+    """
+    if inputs.mu <= 0:
+        raise ValueError("mu must be positive")
+    return inputs.mu * normal_force(inputs)
+
+
+def traction_limited(inputs: Inputs, scan: int = 240) -> tuple[float, int]:
+    """The fastest the car is still grip-capped, and the gear it is capped in.
+
+    ``(0.0, 0)`` when the engine never out-muscles the tires, or when there is no
+    torque curve to ask.
+
+    Read straight off the tractive-effort chart: walk the gears the shift schedule
+    actually uses, in the order it uses them, and find the last speed at which the
+    gear the car is in makes more force than :func:`traction_limit` allows. Each
+    gear is searched only across its own slice of the run — the speeds between the
+    upshift that engages it and the one that leaves it — because a gear's curve
+    says nothing about speeds the car never sees it at.
+
+    Deliberately *not* computed inside :func:`_accel_run`. That loop stops at the
+    benchmark speed, so a car still spinning its tires at 100 km/h would report
+    being grip-limited to exactly 100 km/h, in whatever gear it happened to be in
+    — an artifact of the finish line, not a fact about the car.
+
+    Two different things end the grip-limited region, and both are reported as the
+    speed where it ends. Either the gear's curve descends through the limit, which
+    is bisected out of the scan grid; or the curve is still above the limit when
+    the gear runs out and the upshift drops the force below it, in which case the
+    shift speed itself is the answer. The chart shows the second as a trace ending
+    above the line rather than crossing it.
+    """
+    span = inputs.curve_span()
+    if span is None or not inputs.gears:
+        return 0.0, 0
+    if inputs.weight <= 0:
+        raise ValueError("weight must be positive")
+    if inputs.mu <= 0:
+        raise ValueError("mu must be positive")
+    if scan <= 0:
+        raise ValueError("scan must be positive")
+
+    limit = traction_limit(inputs)
+    _, span_high = span
+
+    def force(speed: float, ratio: float) -> float:
+        return _effort(inputs, ratio, _rpm(inputs, speed, ratio))
+
+    # The gaps between the shift speeds, exactly as in `gear_spread`: gear i runs
+    # from the upshift that engaged it to the one that leaves it, and the top gear
+    # runs out to its own redline.
+    edges = (
+        [0.0]
+        + [s.speed for s in shift_points(inputs)]
+        + [_speed(inputs, inputs.max_rpm, inputs.gears[-1])]
+    )
+
+    # Downwards: the highest gear that caps anywhere is the last one that does.
+    for i in range(len(inputs.gears) - 1, -1, -1):
+        ratio = inputs.gears[i]
+        low = edges[i]
+        # Past the torque curve's last point there is no data, and no drawn trace.
+        high = min(edges[i + 1], _speed(inputs, span_high, ratio))
+        if high <= low:
+            continue  # ratios entered out of order: this gear covers nothing
+
+        # The topmost grid sample that is still capped, and the uncapped one above.
+        capped = -1
+        for k in range(scan + 1):
+            if force(low + (high - low) * k / scan, ratio) > limit:
+                capped = k
+        if capped < 0:
+            continue
+        if capped == scan:
+            # Still pulling harder than the tires can hold when the gear ends.
+            return high, i + 1
+
+        lo = low + (high - low) * capped / scan
+        hi = low + (high - low) * (capped + 1) / scan
+        for _ in range(60):
+            mid = (lo + hi) / 2.0
+            if force(mid, ratio) > limit:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2.0, i + 1
+
+    return 0.0, 0
+
+
 def _gear_from_shifts(shift_speeds: list[float], speed: float, n_gears: int) -> int:
     """:func:`gear_at_speed` against a precomputed list of shift speeds.
 
@@ -674,11 +804,13 @@ def _gear_from_shifts(shift_speeds: list[float], speed: float, n_gears: int) -> 
     return n_gears
 
 
-def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> tuple[float | None, float, int]:
+def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> float | None:
     """Integrate ``dv / a`` from rest to ``target_speed``, ignoring shift dead time.
 
-    Returns ``(seconds, traction_limited_to, traction_limited_gear)``, with
-    ``seconds`` ``None`` when there is no torque curve or the car tops out first.
+    Returns seconds, or ``None`` when there is no torque curve or the car tops out
+    first. How much of the run was grip-capped is :func:`traction_limited`'s
+    question, not this one's — asking it here would bound the answer by the
+    benchmark speed rather than by the car.
 
     Everything is computed in SI regardless of the selected units, because
     ``a = F / m`` only holds with consistent ones: pounds-force over pounds-mass
@@ -688,8 +820,8 @@ def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> tuple[float |
         raise ValueError("need at least one gear")
     if inputs.weight <= 0:
         raise ValueError("weight must be positive")
-    if inputs.grip <= 0:
-        raise ValueError("grip must be positive")
+    if inputs.mu <= 0:
+        raise ValueError("mu must be positive")
     if inputs.shift_time < 0:
         raise ValueError("shift_time must be non-negative")
     if target_speed <= 0:
@@ -698,30 +830,27 @@ def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> tuple[float |
         raise ValueError("steps must be positive")
 
     if inputs.curve_span() is None:
-        return None, 0.0, 0
+        return None
     # Nothing below the top gear's redline is out of reach, and past it no amount
     # of integrating helps. Checking first means the loop below is always finite.
     if target_speed > max(_speed(inputs, inputs.max_rpm, r) for r in inputs.gears):
-        return None, 0.0, 0
+        return None
 
     metric = inputs.units == "metric"
     to_mps = MPS_PER_KMH if metric else MPS_PER_MPH
     force_to_n = 1.0 if metric else N_PER_LBF
     mass = inputs.weight if metric else inputs.weight * KG_PER_LB
 
-    # Grip acts on the weight pressing the tires down, so it scales with the real
-    # mass, never the inertia-inflated one below. Taking the whole mass as load on
-    # the driven axle ignores weight distribution and transfer — the calculator
-    # asks for neither — so this is the optimistic bound, not a launch model.
-    grip_force = inputs.grip * mass * STANDARD_GRAVITY
+    # The same cap the chart draws, in newtons. `mu * N` weighs the real mass, never
+    # the inertia-inflated one below: friction acts on what presses the tires down,
+    # not on what the drivetrain has to spin up.
+    grip_force = traction_limit(inputs) * force_to_n
 
     shift_speeds = [s.speed for s in shift_points(inputs)]
     n_gears = len(inputs.gears)
 
     delta = target_speed * to_mps / steps
     seconds = 0.0
-    limited_to = 0.0
-    limited_gear = 0
     for k in range(steps):
         # Midpoint, not trapezoid: 1/a jumps at every shift, and averaging the two
         # sides of a jump smears force from one gear into the next.
@@ -732,14 +861,7 @@ def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> tuple[float |
         ratio = inputs.gears[gear - 1]
         engine_force = _effort(inputs, ratio, _rpm(inputs, speed, ratio)) * force_to_n
 
-        if grip_force < engine_force:
-            force = grip_force
-            # The last sample grip caps, so the last gear it caps in. A bumpy
-            # torque curve can re-cap after an upshift, and the later gear wins.
-            limited_to = speed
-            limited_gear = gear
-        else:
-            force = engine_force
+        force = min(engine_force, grip_force)
 
         # Everything geared up behind the clutch has to be spun up too, and its
         # apparent mass grows with the square of the ratio it sits behind. This is
@@ -748,7 +870,7 @@ def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> tuple[float |
         spin = 1.04 + 0.0025 * overall_ratio(ratio, inputs.final_drive, inputs.transfer) ** 2
         seconds += delta / (force / (mass * spin))
 
-    return seconds, limited_to, limited_gear
+    return seconds
 
 
 def accel_time(inputs: Inputs, target_speed: float, steps: int = ACCEL_STEPS) -> float | None:
@@ -757,7 +879,7 @@ def accel_time(inputs: Inputs, target_speed: float, steps: int = ACCEL_STEPS) ->
     ``target_speed`` is in display units — km/h under metric, mph under imperial —
     but the answer is in seconds either way.
     """
-    seconds, _, _ = _accel_run(inputs, target_speed, steps)
+    seconds = _accel_run(inputs, target_speed, steps)
     if seconds is None:
         return None
     shifts = sum(1 for s in shift_points(inputs) if s.speed < target_speed)
@@ -771,7 +893,7 @@ def acceleration(inputs: Inputs) -> Accel | None:
     an empty list — with no engine data there is no run to time.
 
     What this models: engine torque through the gearing, a traction limit from
-    ``grip``, dead time on each upshift, and the inertia of the spinning drivetrain.
+    ``mu``, dead time on each upshift, and the inertia of the spinning drivetrain.
 
     What it does not: aerodynamic drag, rolling resistance, drivetrain efficiency
     losses, and the torque converter. Each needs data the calculator never asks
@@ -780,7 +902,7 @@ def acceleration(inputs: Inputs) -> Accel | None:
     dress a gearing tool up as a vehicle-dynamics sim. Two consequences follow from
     their absence and are worth knowing. Nothing decelerates the car during a shift,
     so dead time simply adds. And in the traction-limited region mass cancels out of
-    ``grip * m * g / (m * spin)``, so it is grip, not weight, that sets the launch.
+    ``mu * m * g / (m * spin)``, so it is ``mu``, not weight, that sets the launch.
 
     Times are therefore optimistic in absolute terms. Comparing two gearsets on one
     car, which is what this calculator is for, they are sound.
@@ -789,13 +911,15 @@ def acceleration(inputs: Inputs) -> Accel | None:
         return None
 
     target = BENCHMARK_KMH if inputs.units == "metric" else BENCHMARK_MPH
-    seconds, limited_to, limited_gear = _accel_run(inputs, target, ACCEL_STEPS)
+    seconds = _accel_run(inputs, target, ACCEL_STEPS)
     shifts = sum(1 for s in shift_points(inputs) if s.speed < target)
+    # Spans the whole rev range, so it stands even when the car never reaches the
+    # benchmark and `time` is None. A car too slow for 0-100 still lights its tires.
+    limited_to, limited_gear = traction_limited(inputs)
     return Accel(
         target_speed=target,
         time=None if seconds is None else seconds + shifts * inputs.shift_time,
         shifts=shifts,
-        # Resolved only to the sample grid, so it is within target/ACCEL_STEPS.
         traction_limited_to=limited_to,
         traction_limited_gear=limited_gear,
     )
@@ -822,6 +946,7 @@ class Result:
     efforts: list[EffortCurve] = field(default_factory=list)
     crossovers: list[Crossover] = field(default_factory=list)
     max_force: float = 0.0
+    traction_limit: float = 0.0  # force the tires can hold, same unit as max_force
     peak_torque: tuple[float, float] | None = None  # (rpm, torque)
     peak_power: tuple[float, float] | None = None  # (rpm, power)
     acceleration: Accel | None = None  # None when no torque curve was supplied
@@ -883,6 +1008,7 @@ class Result:
                 for c in self.crossovers
             ],
             "max_force": self.max_force,
+            "traction_limit": self.traction_limit,
             "peak_torque": self.peak_torque,
             "peak_power": self.peak_power,
             "acceleration": None
@@ -951,6 +1077,7 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
         efforts=efforts,
         crossovers=shift_crossovers(inputs),
         max_force=max_force,
+        traction_limit=traction_limit(inputs),
         peak_torque=peak_torque,
         peak_power=peak_power,
         acceleration=acceleration(inputs),

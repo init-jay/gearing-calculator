@@ -516,10 +516,27 @@ function renderEffortChart(svg, series, speed) {
   const xMax = Math.max(...series.flatMap((s) => s.result.efforts.map((e) => lastSample(e)[0]))) * 1.05;
   const yMax = Math.max(...series.map((s) => s.result.max_force)) * 1.05;
 
-  const { xPix, yPix } = drawFrame(svg, {
+  const { xPix, yPix, top } = drawFrame(svg, {
     W, H, M, xMax, yMax,
     xTitle: `Speed (${series[0].result.speed_unit})`,
     yTitle: `Tractive effort (${series[0].result.force_unit})`,
+  });
+
+  // Drawn before the curves so they read on top of it. A limit above the tallest
+  // curve is left undrawn rather than stretching the axis to reach it: nothing on
+  // this chart is traction-limited, and the band would be an empty strip of sky.
+  series.forEach((s) => {
+    const limit = s.result.traction_limit;
+    if (!(limit > 0) || limit >= yMax) return;
+    const y = yPix(limit);
+    svg.append(svgEl("rect", {
+      class: `chart-grip-band chart-grip-band-${s.key}`,
+      x: M.left, y: top, width: W - M.left - M.right, height: y - top,
+    }));
+    svg.append(svgEl("line", {
+      class: `chart-grip-line chart-grip-line-${s.key}`,
+      x1: M.left, y1: y, x2: W - M.right, y2: y,
+    }));
   });
 
   series.forEach((s) => {
@@ -618,6 +635,11 @@ function renderEffortLegend(el, series) {
   if (series.some((s) => s.result.crossovers.some((c) => !c.at_redline))) {
     legendEntry(el, "swatch swatch-dot", "Optimal shift point");
   }
+  // Only when a band was actually drawn, on the same terms renderEffortChart uses.
+  const yMax = Math.max(...series.map((s) => s.result.max_force)) * 1.05;
+  if (series.some((s) => s.result.traction_limit > 0 && s.result.traction_limit < yMax)) {
+    legendEntry(el, "swatch swatch-grip", "Beyond tire grip");
+  }
 }
 
 /** Peak torque and peak power, spelled out under the engine chart. */
@@ -668,7 +690,7 @@ function renderAccel(el, series) {
                    `${(a.shifts * s.inputs.shift_time).toFixed(2)} s`);
       }
       parts.push(a.traction_limited_to > 0
-        ? `traction-limited at ${a.traction_limited_to.toFixed(0)} ${unit}` +
+        ? `traction-limited below ${a.traction_limited_to.toFixed(0)} ${unit}` +
           ` in ${ordinal(a.traction_limited_gear)} gear`
         : "never traction-limited");
       span.textContent = who + parts.join(" · ");
@@ -894,7 +916,7 @@ function readInputs(root) {
     shift_rpm: num(root, "shift_rpm", 7000),
     units: currentUnits(),
     weight: num(root, "weight", 1400),
-    grip: num(root, "grip", 1.0),
+    mu: num(root, "mu", 1.0),
     shift_time: num(root, "shift_time", 0.3),
     torque_curve: readCurve(root),
   };
@@ -999,6 +1021,54 @@ const PRESET_GROUPS = {
   tire: "tires",
 };
 
+const isPositive = (v) => Number.isFinite(v) && v > 0;
+const isName = (v) => typeof v === "string" && v.length > 0;
+
+/** The keys each preset group must supply, and what counts as a usable value. */
+const PRESET_SHAPE = {
+  gearboxes: {
+    name: isName,
+    gears: (v) => Array.isArray(v) && v.length > 0 && v.every(isPositive),
+  },
+  engines: {
+    name: isName,
+    redline: isPositive,
+    torque_curve: (v) =>
+      Array.isArray(v) && v.length >= 2 &&
+      v.every((p) => Array.isArray(p) && p.length === 2 && p.every(isPositive)),
+  },
+  vehicles: { name: isName, weight: isPositive },
+  tires: { name: isName, mu: isPositive },
+};
+
+/**
+ * presets.json is meant to be hand-edited, so a missing or misspelled key is a
+ * user error rather than an impossible state — and it has to be caught here, at
+ * boot, where the message can still name the offending entry.
+ *
+ * Left unchecked it does not throw anywhere. `applyPreset` writes the missing
+ * value into a number input as the string "undefined", which the input rejects
+ * by going blank; `num()` then reads the blank as NaN and substitutes its
+ * fallback. The result is a silently empty box beside a chart drawn from default
+ * numbers, which reads as a rendering bug and is anything but.
+ */
+function validatePresets(data) {
+  for (const [group, shape] of Object.entries(PRESET_SHAPE)) {
+    const items = data?.[group];
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error(`presets.json: "${group}" must be a non-empty array`);
+    }
+    items.forEach((item, i) => {
+      for (const [key, isValid] of Object.entries(shape)) {
+        if (!isValid(item?.[key])) {
+          const who = isName(item?.name) ? `"${item.name}"` : `entry ${i}`;
+          throw new Error(`presets.json: ${group} ${who} has a missing or invalid "${key}"`);
+        }
+      }
+    });
+  }
+}
+
 /** Options are indices into `presets`; the empty value means hand-entered. */
 function fillPresetSelect(sel, items) {
   sel.replaceChildren(new Option("Custom", ""));
@@ -1036,8 +1106,8 @@ function applyPreset(root, sel) {
     const weight = metric ? chosen.weight : convertWeight(chosen.weight, "imperial");
     field(root, "weight").value = metric ? String(weight) : weight.toFixed(0);
   } else {
-    // Grip is a lateral G figure: dimensionless, so no unit conversion.
-    field(root, "grip").value = String(chosen.grip);
+    // A coefficient of friction is a pure ratio, so no unit conversion.
+    field(root, "mu").value = String(chosen.mu);
   }
   recompute();
 }
@@ -1284,7 +1354,7 @@ function onUnitChange() {
   // Torque, unlike the tire size, has no unit-agnostic source to re-derive from:
   // the numbers on screen *are* the data, so they have to be restated in place.
   // Both setups convert, even the inactive one, or B would silently keep lb-ft.
-  // Weight is the same story; grip is dimensionless and stays as it is.
+  // Weight is the same story; mu is a pure ratio and stays as it is.
   for (const key of SETUP_KEYS) {
     const root = setupRoot(key);
     buildCurveRows(root, convertCurve(readCurve(root), currentUnits()));
@@ -1326,7 +1396,7 @@ function wireEvents() {
       else if (e.target.closest("[data-curve-list]") || e.target.dataset.field === "max_rpm")
         markCustom(root, "engine");
       else if (e.target.dataset.field === "weight") markCustom(root, "vehicle");
-      else if (e.target.dataset.field === "grip") markCustom(root, "tire");
+      else if (e.target.dataset.field === "mu") markCustom(root, "tire");
     }
     recompute();
   });
@@ -1390,6 +1460,7 @@ async function main() {
     fetch("calc.py").then((r) => r.text()),
     fetch("presets.json").then((r) => r.json()),
   ]);
+  validatePresets(presetData);
   presets = presetData;
 
   const base = pyodideBaseUrl(config.pyodide);
@@ -1413,7 +1484,7 @@ async function main() {
     field(root, "max_rpm").value = String(presets.engines[0].redline);
     field(root, "shift_rpm").value = String(presets.engines[0].redline);
     field(root, "weight").value = String(presets.vehicles[0].weight);
-    field(root, "grip").value = String(presets.tires[0].grip);
+    field(root, "mu").value = String(presets.tires[0].mu);
     presetSelect(root, "gearbox").value = "0";
     presetSelect(root, "engine").value = "0";
     presetSelect(root, "vehicle").value = "0";
@@ -1428,7 +1499,9 @@ async function main() {
 
 main().catch((err) => {
   console.error(err);
+  // Reached by a bad presets.json as well as by a runtime that will not load, so
+  // the headline stays neutral; `runtimeHint` is only set once the former passed.
   const hint = runtimeHint ? `<br><small>${runtimeHint}</small>` : "";
   $("#loading").innerHTML =
-    `<p role="alert">Failed to start Python.<br><small>${err}</small>${hint}</p>`;
+    `<p role="alert">Failed to start.<br><small>${err}</small>${hint}</p>`;
 });

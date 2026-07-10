@@ -126,9 +126,10 @@ def test_vehicle_weight_is_plausible(vehicle):
 
 
 @pytest.mark.parametrize("tire", TIRES, ids=lambda t: t["name"])
-def test_tire_grip_is_plausible(tire):
-    # Lateral G. Below ~0.5 nothing road-legal, above ~2.0 nothing without wings.
-    assert 0.5 <= tire["grip"] <= 2.0
+def test_tire_mu_is_plausible(tire):
+    # Coefficient of static friction on dry road. Below ~0.5 nothing road-legal;
+    # above ~2.0 nothing that is not generating its own downforce.
+    assert 0.5 <= tire["mu"] <= 2.0
 
 
 def test_every_vehicle_and_tire_reaches_the_benchmark():
@@ -143,26 +144,26 @@ def test_every_vehicle_and_tire_reaches_the_benchmark():
                 "shift_rpm": engine["redline"],
                 "torque_curve": engine["torque_curve"],
                 "weight": vehicle["weight"],
-                "grip": tire["grip"],
+                "mu": tire["mu"],
             })
             accel = result["acceleration"]
             assert accel["time"] is not None
             assert accel["time"] > 0.0
 
 
-def test_grip_and_weight_move_the_benchmark_in_the_right_direction():
+def test_mu_and_weight_move_the_benchmark_in_the_right_direction():
     # Guards the wiring, not the physics: a preset that fed the wrong field would
     # still produce a number, just an unresponsive one.
-    def run(weight, grip):
+    def run(weight, mu):
         return calc.compute({
             "gears": GEARBOXES[0]["gears"], "torque_curve": ENGINES[0]["torque_curve"],
-            "max_rpm": ENGINES[0]["redline"], "weight": weight, "grip": grip,
+            "max_rpm": ENGINES[0]["redline"], "weight": weight, "mu": mu,
         })["acceleration"]["time"]
 
     heaviest = max(v["weight"] for v in VEHICLES)
     lightest = min(v["weight"] for v in VEHICLES)
     assert run(heaviest, 1.0) > run(lightest, 1.0)
 
-    stickiest = max(t["grip"] for t in TIRES)
-    slipperiest = min(t["grip"] for t in TIRES)
+    stickiest = max(t["mu"] for t in TIRES)
+    slipperiest = min(t["mu"] for t in TIRES)
     assert run(1400.0, stickiest) < run(1400.0, slipperiest)

@@ -209,12 +209,12 @@
     </div>
 
     <div class="field">
-      <label for="grip">Tire grip <span class="unit">lateral G</span></label>
-      <!-- Dimensionless, so unlike every other figure here it reads the same in
-           both unit systems. Caps the launch: no gearing can push harder than
-           the tires hold. -->
+      <label for="mu">Tire friction <span class="unit">μ, static</span></label>
+      <!-- A pure ratio, so unlike every other figure here it reads the same in
+           both unit systems. Caps the launch at mu times the weight on the tires:
+           no gearing can push harder than friction holds. -->
       <select class="preset" data-preset="tire" aria-label="Tire preset"></select>
-      <input type="number" id="grip" data-field="grip" value="1.0"
+      <input type="number" id="mu" data-field="mu" value="1.0"
              min="0.1" max="2.5" step="0.05" />
     </div>
 

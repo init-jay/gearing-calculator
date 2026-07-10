@@ -1129,6 +1129,32 @@ function copySetup(from, to) {
   }
 }
 
+/* ------------------------------ inputs drawer ---------------------------- */
+
+/** Open/close the off-canvas inputs panel. Results keep updating live behind
+ * the backdrop, so tweaking a ratio shows its effect without closing. */
+function setInputsDrawer(open) {
+  $("#inputs-drawer").classList.toggle("open", open);
+  $("#drawer-backdrop").hidden = !open;
+  $("#inputs-toggle").setAttribute("aria-expanded", String(open));
+  if (open) {
+    $("#inputs-close").focus();
+  } else {
+    $("#inputs-toggle").focus();
+  }
+}
+
+function initInputsDrawer() {
+  $("#inputs-toggle").addEventListener("click", () => setInputsDrawer(true));
+  $("#inputs-close").addEventListener("click", () => setInputsDrawer(false));
+  $("#drawer-backdrop").addEventListener("click", () => setInputsDrawer(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && $("#inputs-drawer").classList.contains("open")) {
+      setInputsDrawer(false);
+    }
+  });
+}
+
 /* -------------------------------- lap map -------------------------------- */
 /*
  * RaceChrono CSV -> speed-shaded GPS trace. Fully independent of the gearing
@@ -1818,6 +1844,7 @@ function wireEvents() {
   $("#cur_speed").addEventListener("input", redraw);
 
   initLapMap();
+  initInputsDrawer();
 }
 
 async function main() {

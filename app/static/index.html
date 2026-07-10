@@ -41,10 +41,41 @@
       </p>
     </header>
 
+    <!-- Pinned while the page scrolls, so the inputs and the speed marker stay
+         reachable from any chart. The slider keeps its id: the same handlers
+         drive the gauges and chart markers wherever it lives. -->
+    <div class="topbar">
+      <button type="button" id="inputs-toggle" class="hamburger"
+              aria-controls="inputs-drawer" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M3 6h18M3 12h18M3 18h18" />
+        </svg>
+        <span>Inputs</span>
+      </button>
+      <div class="field topbar-speed">
+        <label for="cur_speed">
+          Current speed <output id="cur_speed_out">100</output>
+          <span class="unit" data-speed-unit>km/h</span>
+        </label>
+        <input type="range" id="cur_speed" min="0" max="277" step="1" value="100" />
+      </div>
+    </div>
+
+    <!-- Click-away target behind the drawer; sits under it in z-order. -->
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+
     <div class="layout">
       <!-- ------------------------------ inputs ------------------------------ -->
-      <section class="panel" aria-labelledby="inputs-heading">
-        <h2 id="inputs-heading">Inputs</h2>
+      <!-- An off-canvas drawer, opened by the hamburger in the header. It stays
+           in the DOM closed, so every input read (recompute, the lap gear maps)
+           works regardless of whether it is on screen. -->
+      <section class="panel inputs-drawer" id="inputs-drawer"
+               aria-labelledby="inputs-heading">
+        <div class="drawer-head">
+          <h2 id="inputs-heading">Inputs</h2>
+          <button type="button" id="inputs-close" class="drawer-close"
+                  aria-label="Close inputs">&times;</button>
+        </div>
 
         <!-- Outside the setups: comparing km/h against mph on one chart is
              meaningless, so both setups always share a unit system. -->
@@ -104,14 +135,8 @@
                aria-label="Tachometer"></svg>
         </div>
 
+        <!-- The speed slider itself lives in the sticky topbar. -->
         <div class="controls">
-          <div class="field">
-            <label for="cur_speed">
-              Current speed <output id="cur_speed_out">100</output>
-              <span class="unit" data-speed-unit>km/h</span>
-            </label>
-            <input type="range" id="cur_speed" min="0" max="277" step="1" value="100" />
-          </div>
           <div class="field">
             <label for="cur_gear">Gear <span class="unit" id="gear_scope" hidden>A / B</span></label>
             <output id="cur_gear" class="gear-readout">1</output>
@@ -191,9 +216,7 @@
     <section class="panel lap-panel" aria-labelledby="lapmap-heading">
       <h2 id="lapmap-heading">Lap map</h2>
       <p class="hint">
-        Upload a RaceChrono Pro CSV export (Format 3) to trace a lap from its
-        GPS log, colored by speed — or by the gear each setup above would hold
-        there, one map per setup while comparing. Nothing leaves your browser.
+        Load a RaceChrono Pro CSV export (Format 3) to trace a lap. No data is collected, calculation is done in browser.
       </p>
       <div class="lap-controls">
         <input type="file" id="lap-file" accept=".csv,text/csv"
@@ -226,17 +249,17 @@
         <!-- Gear mode only: what the simulated driver is doing. Static copy,
              but it names live inputs (shift RPM, dead time), so keep it in
              sync with gears_at_speeds in calc.py. -->
-        <details id="lap-strategy" class="viz lap-strategy" hidden>
-          <summary>Shift strategy</summary>
+        <div id="lap-strategy" class="lap-strategy" hidden>
+          <h3>Shift strategy</h3>
           <p class="hint">
             The map runs your lap's speed trace through each setup's gearing.
           </p>
           <ul class="hint lap-strategy-list">
-            <li><strong>Upshifts</strong> happen at the input
+            <li><strong>Upshifts:</strong> happen at the input
               <em>Shift at RPM</em>, like the shift trace above.</li>
-            <li><strong>Downshifts</strong> wait until the lower gear pulls harder; using the same tractive-effort crossovers as
+            <li><strong>Downshifts:</strong> wait until the lower gear pulls harder; using the same tractive-effort crossovers as
               the Optimal shift points table. A taller
-              gear that is still the stronger one is simply held.</li>
+              gear that is still the stronger one is held.</li>
             <li><strong>Corners:</strong> above
               <label class="lap-corner-g-label">
                 <input type="number" id="lap-corner-g" value="0.4"
@@ -244,12 +267,12 @@
                        aria-label="Cornering threshold in G" />&nbsp;G
               </label>
               of lateral load the downshift waits for the car to unwind. Upshifts still fire.</li>
-            <li><strong>Shift dead time is anticipated:</strong> if a downshift
+            <li><strong>Shift time cost:</strong> if a downshift
               cannot repay the down-and-back-up cost (2× <em>Shift dead
               time</em>) before the revs recover, then hold taller gear.</li>
-            <li>Never uses 1st gear.</li>
+            <li>Never use 1st gear.</li>
           </ul>
-        </details>
+        </div>
       </div>
     </section>
   </main>

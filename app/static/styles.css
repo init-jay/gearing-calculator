@@ -137,15 +137,105 @@ main {
   color: var(--muted);
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
-  gap: 1.5rem;
-  align-items: start;
+/* One column: the inputs live in the drawer, so results take the width. */
+.layout { display: block; }
+
+/* Pinned toolbar: hamburger + speed slider follow the scroll, so any chart
+   can be read against a different speed or setup without scrolling back up.
+   Below the drawer and its backdrop in z-order, so opening Inputs dims it. */
+.topbar {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.08);
 }
 
-@media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; }
+.topbar-speed {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 14rem;
+}
+
+.topbar-speed label { white-space: nowrap; }
+.topbar-speed input[type="range"] { flex: 1; }
+
+.hamburger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.hamburger:hover { border-color: var(--accent); }
+.hamburger svg { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+
+/* ------------------------------ inputs drawer ---------------------------- */
+
+.inputs-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(22rem, 92vw);
+  overflow-y: auto;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  transform: translateX(-105%); /* past its own shadow, not just its box */
+  transition: transform 0.25s ease;
+  box-shadow: 0 0 2rem rgba(0, 0, 0, 0.25);
+}
+
+.inputs-drawer.open { transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .inputs-drawer { transition: none; }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* The panel h2 brings its own bottom margin; keep the close button on its line. */
+.drawer-head h2 { margin-bottom: 0; }
+.drawer-head { margin-bottom: 1rem; }
+
+.drawer-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  cursor: pointer;
+}
+
+.drawer-close:hover { color: var(--text); }
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.4);
 }
 
 .panel {
@@ -536,13 +626,15 @@ fieldset.units label {
 .gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
 .gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
 
+/* Just the gear readout now (the slider moved to the topbar): a small box
+   sitting under the tach, where a cluster puts its gear indicator. */
 .controls {
-  display: grid;
-  grid-template-columns: 1fr 7rem;
-  gap: 1rem;
-  align-items: end;
+  display: flex;
+  justify-content: flex-end;
   margin-top: 0.75rem;
 }
+
+.controls .field { width: 7rem; }
 
 /* The gear is derived from the shift schedule rather than chosen, so it gets
    the same dashed treatment as the derived tire diameter — but keeps the box
@@ -888,8 +980,7 @@ tbody td.is-current { background: var(--accent-soft); }
 
 .lap-gear-chips { display: flex; flex-wrap: wrap; gap: 0.75rem; }
 
-.lap-strategy { max-width: 48rem; margin-top: 1.25rem; }
-.lap-strategy > summary { font-size: 0.85rem; }
+.lap-strategy { max-width: 48rem; }
 .lap-strategy-list { margin: 0; padding-left: 1.1rem; }
 .lap-strategy-list li { margin-bottom: 0.35rem; }
 

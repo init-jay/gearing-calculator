@@ -30,7 +30,24 @@ from math import pi
 
 MM_PER_INCH = 25.4
 INCHES_PER_FOOT = 12.0
+METERS_PER_FOOT = 0.3048
 NM_PER_LBFT = 1.3558179483314004
+
+# Standard gravity, m/s^2: turns a mass into the weight pressing the tires down.
+STANDARD_GRAVITY = 9.80665
+
+# A pound-force is a pound-foot of torque on a one-foot arm, so the force
+# conversion falls out of the torque one: 1.3558... / 0.3048 = 4.4482216...
+N_PER_LBF = NM_PER_LBFT / METERS_PER_FOOT
+# ...and a pound-force is *by definition* a pound-mass under standard gravity, so
+# dividing g back out gives lb -> kg = 0.45359237 exactly. Deriving both from
+# NM_PER_LBFT keeps every mass and force conversion tied to one root constant.
+KG_PER_LB = N_PER_LBF / STANDARD_GRAVITY
+
+MPS_PER_KMH = 1000.0 / 3600.0
+# Reuses the 63360 inches per mile already folded into MPH_CONST: 63360 * 25.4 mm
+# is 1609.344 m, over 3600 s, so a mph is 0.44704 m/s.
+MPS_PER_MPH = 63360.0 * MM_PER_INCH / 1000.0 / 3600.0
 
 # Imperial constant: mph = rpm * tire_dia_in / (overall_ratio * MPH_CONST).
 # Derivation: inches/hour = rpm * pi * dia * 60; miles/hour divides by 63360,
@@ -43,6 +60,16 @@ HP_CONST = 33000.0 / (2.0 * pi)
 # kW = torque_nm * rpm / 9549.29...  Watts are N.m * rad/s; rpm -> rad/s is
 # 2*pi/60, and dividing by 1000 gives kW, so the constant is 30000 / pi.
 KW_CONST = 30000.0 / pi
+
+# The standing-start yardstick, per market. These are *different* physical speeds
+# — 100 km/h is 62.14 mph — but each is the benchmark its readers know, so the
+# quoted time follows the selected unit system rather than converting.
+BENCHMARK_KMH = 100.0
+BENCHMARK_MPH = 60.0
+
+# Midpoint samples across the speed range. Fixed, like the scan and bisection
+# counts in `shift_crossovers`, so a run is deterministic and unit-independent.
+ACCEL_STEPS = 2000
 
 Units = str  # "imperial" | "metric"
 
@@ -209,6 +236,17 @@ def convert_curve(points, to_units: Units) -> TorqueCurve:
     return [(rpm, torque * factor) for rpm, torque in points]
 
 
+def convert_weight(value: float, to_units: Units) -> float:
+    """Restate a vehicle weight in the other unit system: kg under metric, lb under imperial.
+
+    The counterpart of :func:`convert_curve`, and for the same reason — the number
+    on screen *is* the data, with no unit-agnostic source to re-derive it from, so
+    a unit change has to restate it in place.
+    """
+    _validate_units(to_units)
+    return value * (KG_PER_LB if to_units == "metric" else 1.0 / KG_PER_LB)
+
+
 def torque_at_rpm(curve: TorqueCurve, rpm: float) -> float:
     """Linear interpolation between the curve's points.
 
@@ -286,6 +324,23 @@ class Crossover:
 
 
 @dataclass
+class Accel:
+    """A standing-start run to the benchmark speed.
+
+    ``time`` is ``None`` when the car tops out below ``target_speed``. That is a
+    different answer from :attr:`Result.acceleration` being ``None``, which means
+    there was no torque curve to run at all — "too slow to get there" and "no
+    engine data" must not collapse into the same value.
+    """
+
+    target_speed: float  # the benchmark, in display units
+    time: float | None  # seconds, or None when the target is never reached
+    shifts: int  # upshifts below the target; time - shifts * shift_time is engine-only
+    traction_limited_to: float  # speed below which grip capped the force, 0.0 if never
+    traction_limited_gear: int  # the gear it was still grip-capped in, 0 if never
+
+
+@dataclass
 class Inputs:
     """All calculator inputs; keeps the JS<->Python boundary explicit."""
 
@@ -297,6 +352,9 @@ class Inputs:
     max_rpm: float = 7000.0
     units: Units = "metric"
     shift_rpm: float | None = None  # None => shift at the redline
+    weight: float = 1400.0  # kg under metric, lb under imperial
+    grip: float = 1.0  # lateral G the tires hold; dimensionless, so never converted
+    shift_time: float = 0.3  # seconds of dead time per upshift
     # Empty => no engine data, and every tractive-effort output comes back empty.
     torque_curve: TorqueCurve = field(default_factory=list)
 
@@ -333,6 +391,9 @@ class Inputs:
             max_rpm=float(data.get("max_rpm", 7000.0)),
             units=data.get("units", "metric"),
             shift_rpm=None if shift_rpm is None else float(shift_rpm),
+            weight=float(data.get("weight", 1400.0)),
+            grip=float(data.get("grip", 1.0)),
+            shift_time=float(data.get("shift_time", 0.3)),
             torque_curve=normalize_curve(data.get("torque_curve") or []),
         )
 
@@ -600,6 +661,146 @@ def shift_crossovers(inputs: Inputs, scan: int = 240) -> list[Crossover]:
     return out
 
 
+def _gear_from_shifts(shift_speeds: list[float], speed: float, n_gears: int) -> int:
+    """:func:`gear_at_speed` against a precomputed list of shift speeds.
+
+    Identical semantics — strictly ``<``, so at a shift speed the shift has
+    already happened — but it does not rebuild every :class:`ShiftPoint` on each
+    call, which an integrator sampling thousands of speeds cannot afford.
+    """
+    for i, shift_speed in enumerate(shift_speeds):
+        if speed < shift_speed:
+            return i + 1
+    return n_gears
+
+
+def _accel_run(inputs: Inputs, target_speed: float, steps: int) -> tuple[float | None, float, int]:
+    """Integrate ``dv / a`` from rest to ``target_speed``, ignoring shift dead time.
+
+    Returns ``(seconds, traction_limited_to, traction_limited_gear)``, with
+    ``seconds`` ``None`` when there is no torque curve or the car tops out first.
+
+    Everything is computed in SI regardless of the selected units, because
+    ``a = F / m`` only holds with consistent ones: pounds-force over pounds-mass
+    is off by ``g``. Seconds come out the same either way.
+    """
+    if not inputs.gears:
+        raise ValueError("need at least one gear")
+    if inputs.weight <= 0:
+        raise ValueError("weight must be positive")
+    if inputs.grip <= 0:
+        raise ValueError("grip must be positive")
+    if inputs.shift_time < 0:
+        raise ValueError("shift_time must be non-negative")
+    if target_speed <= 0:
+        raise ValueError("target speed must be positive")
+    if steps <= 0:
+        raise ValueError("steps must be positive")
+
+    if inputs.curve_span() is None:
+        return None, 0.0, 0
+    # Nothing below the top gear's redline is out of reach, and past it no amount
+    # of integrating helps. Checking first means the loop below is always finite.
+    if target_speed > max(_speed(inputs, inputs.max_rpm, r) for r in inputs.gears):
+        return None, 0.0, 0
+
+    metric = inputs.units == "metric"
+    to_mps = MPS_PER_KMH if metric else MPS_PER_MPH
+    force_to_n = 1.0 if metric else N_PER_LBF
+    mass = inputs.weight if metric else inputs.weight * KG_PER_LB
+
+    # Grip acts on the weight pressing the tires down, so it scales with the real
+    # mass, never the inertia-inflated one below. Taking the whole mass as load on
+    # the driven axle ignores weight distribution and transfer — the calculator
+    # asks for neither — so this is the optimistic bound, not a launch model.
+    grip_force = inputs.grip * mass * STANDARD_GRAVITY
+
+    shift_speeds = [s.speed for s in shift_points(inputs)]
+    n_gears = len(inputs.gears)
+
+    delta = target_speed * to_mps / steps
+    seconds = 0.0
+    limited_to = 0.0
+    limited_gear = 0
+    for k in range(steps):
+        # Midpoint, not trapezoid: 1/a jumps at every shift, and averaging the two
+        # sides of a jump smears force from one gear into the next.
+        speed_mps = (k + 0.5) * delta
+        speed = speed_mps / to_mps
+
+        gear = _gear_from_shifts(shift_speeds, speed, n_gears)
+        ratio = inputs.gears[gear - 1]
+        engine_force = _effort(inputs, ratio, _rpm(inputs, speed, ratio)) * force_to_n
+
+        if grip_force < engine_force:
+            force = grip_force
+            # The last sample grip caps, so the last gear it caps in. A bumpy
+            # torque curve can re-cap after an upshift, and the later gear wins.
+            limited_to = speed
+            limited_gear = gear
+        else:
+            force = engine_force
+
+        # Everything geared up behind the clutch has to be spun up too, and its
+        # apparent mass grows with the square of the ratio it sits behind. This is
+        # the standard road-load heuristic, not a measured moment of inertia, but
+        # without it a shorter gear would look like free acceleration.
+        spin = 1.04 + 0.0025 * overall_ratio(ratio, inputs.final_drive, inputs.transfer) ** 2
+        seconds += delta / (force / (mass * spin))
+
+    return seconds, limited_to, limited_gear
+
+
+def accel_time(inputs: Inputs, target_speed: float, steps: int = ACCEL_STEPS) -> float | None:
+    """Seconds from rest to ``target_speed``, or ``None`` if the car never gets there.
+
+    ``target_speed`` is in display units — km/h under metric, mph under imperial —
+    but the answer is in seconds either way.
+    """
+    seconds, _, _ = _accel_run(inputs, target_speed, steps)
+    if seconds is None:
+        return None
+    shifts = sum(1 for s in shift_points(inputs) if s.speed < target_speed)
+    return seconds + shifts * inputs.shift_time
+
+
+def acceleration(inputs: Inputs) -> Accel | None:
+    """The standing-start benchmark run: 0-100 km/h under metric, 0-60 mph under imperial.
+
+    ``None`` when there is no torque curve, the way :func:`effort_curves` returns
+    an empty list — with no engine data there is no run to time.
+
+    What this models: engine torque through the gearing, a traction limit from
+    ``grip``, dead time on each upshift, and the inertia of the spinning drivetrain.
+
+    What it does not: aerodynamic drag, rolling resistance, drivetrain efficiency
+    losses, and the torque converter. Each needs data the calculator never asks
+    for — a frontal area and drag coefficient, a rolling-resistance coefficient, an
+    efficiency map, a converter's K-factor — and inventing defaults for them would
+    dress a gearing tool up as a vehicle-dynamics sim. Two consequences follow from
+    their absence and are worth knowing. Nothing decelerates the car during a shift,
+    so dead time simply adds. And in the traction-limited region mass cancels out of
+    ``grip * m * g / (m * spin)``, so it is grip, not weight, that sets the launch.
+
+    Times are therefore optimistic in absolute terms. Comparing two gearsets on one
+    car, which is what this calculator is for, they are sound.
+    """
+    if inputs.curve_span() is None:
+        return None
+
+    target = BENCHMARK_KMH if inputs.units == "metric" else BENCHMARK_MPH
+    seconds, limited_to, limited_gear = _accel_run(inputs, target, ACCEL_STEPS)
+    shifts = sum(1 for s in shift_points(inputs) if s.speed < target)
+    return Accel(
+        target_speed=target,
+        time=None if seconds is None else seconds + shifts * inputs.shift_time,
+        shifts=shifts,
+        # Resolved only to the sample grid, so it is within target/ACCEL_STEPS.
+        traction_limited_to=limited_to,
+        traction_limited_gear=limited_gear,
+    )
+
+
 @dataclass
 class Result:
     """Computed output for a set of inputs."""
@@ -623,6 +824,7 @@ class Result:
     max_force: float = 0.0
     peak_torque: tuple[float, float] | None = None  # (rpm, torque)
     peak_power: tuple[float, float] | None = None  # (rpm, power)
+    acceleration: Accel | None = None  # None when no torque curve was supplied
 
     def to_dict(self) -> dict:
         """Plain-dict form for easy consumption from JS via ``.toJs()``."""
@@ -683,6 +885,15 @@ class Result:
             "max_force": self.max_force,
             "peak_torque": self.peak_torque,
             "peak_power": self.peak_power,
+            "acceleration": None
+            if self.acceleration is None
+            else {
+                "target_speed": self.acceleration.target_speed,
+                "time": self.acceleration.time,
+                "shifts": self.acceleration.shifts,
+                "traction_limited_to": self.acceleration.traction_limited_to,
+                "traction_limited_gear": self.acceleration.traction_limited_gear,
+            },
         }
 
 
@@ -742,6 +953,7 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
         max_force=max_force,
         peak_torque=peak_torque,
         peak_power=peak_power,
+        acceleration=acceleration(inputs),
     )
 
 

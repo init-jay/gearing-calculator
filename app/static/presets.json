@@ -1,5 +1,5 @@
 {
-  "note": "Starting points, not specifications. Entries with a generic name (\"Six-speed, close ratio\", \"Turbo four, broad plateau\") are archetypes typical of their type and correspond to no real part. Entries named after a real part carry figures a contributor supplied: the N52B30 curve is read by eye off a published *modelled* curve (automobile-catalog / ProfessCars), not a measured dyno pull, though it does reproduce that source's quoted 200 kW at 6700 rpm and 320 N·m at 2750. None of it is verified against hardware. Treat every preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline.",
+  "note": "Starting points, not specifications. Entries with a generic name (\"Six-speed, close ratio\", \"Turbo four, broad plateau\") are archetypes typical of their type and correspond to no real part. Entries named after a real part carry figures a contributor supplied: the N52B30 curve is read by eye off a published *modelled* curve (automobile-catalog / ProfessCars), not a measured dyno pull, though it does reproduce that source's quoted 200 kW at 6700 rpm and 320 N·m at 2750. None of it is verified against hardware. Treat every preset as something to edit, not to trust. Torque is always N·m; the app restates it in lb-ft when imperial units are selected. Weight is always kg; the app restates it in lb when imperial units are selected. Grip is a lateral G figure, dimensionless and identical in both unit systems — what the tires hold on a skidpad, used here as an optimistic stand-in for how hard they can launch. Add your own by editing this file: a gearbox needs a name and descending ratios, an engine needs a name, a redline, and a torque curve whose last point reaches that redline, a vehicle needs a name and a weight, and a tire needs a name and a grip.",
 
   "gearboxes": [
     {
@@ -29,30 +29,6 @@
     {
       "name": "Porsche 987.2 (GS87.40)",
       "gears": [3.308, 1.95, 1.41, 1.13, 0.95, 0.81]
-    },
-    {
-      "name": "Five-speed, wide ratio",
-      "gears": [3.8, 2.2, 1.4, 1.0, 0.8]
-    },
-    {
-      "name": "Five-speed automatic",
-      "gears": [3.67, 2.0, 1.41, 1.0, 0.74]
-    },
-    {
-      "name": "Six-speed, close ratio",
-      "gears": [3.15, 2.05, 1.48, 1.16, 1.0, 0.85]
-    },
-    {
-      "name": "Seven-speed, close ratio",
-      "gears": [3.4, 2.2, 1.6, 1.28, 1.05, 0.88, 0.75]
-    },
-    {
-      "name": "Four-speed, classic",
-      "gears": [2.95, 1.94, 1.34, 1.0]
-    },
-    {
-      "name": "Six-speed dog box, straight cut",
-      "gears": [2.36, 1.78, 1.42, 1.18, 1.0, 0.88]
     }
   ],
 
@@ -137,46 +113,33 @@
         [3000, 330], [3500, 350], [4750, 370], [6000, 355],
         [6500, 340], [7000, 319], [7200, 311.7], [7400, 287]
       ]
-    },
-    {
-      "name": "Naturally aspirated six",
-      "redline": 7000,
-      "torque_curve": [
-        [1000, 180], [2000, 220], [3000, 245], [4000, 255],
-        [5000, 250], [6000, 235], [7000, 205]
-      ]
-    },
-    {
-      "name": "Peaky four, power up top",
-      "redline": 8500,
-      "torque_curve": [
-        [1500, 150], [3000, 175], [4500, 190], [6000, 205],
-        [7000, 210], [8000, 200], [8500, 178]
-      ]
-    },
-    {
-      "name": "Torquey V8, flat and early",
-      "redline": 6000,
-      "torque_curve": [
-        [1000, 400], [2000, 480], [3000, 520], [4000, 530],
-        [5000, 510], [6000, 420]
-      ]
-    },
-    {
-      "name": "Turbo four, broad plateau",
-      "redline": 6500,
-      "torque_curve": [
-        [1500, 180], [2500, 350], [3000, 370], [4500, 370],
-        [5500, 340], [6500, 280]
-      ]
-    },
-    {
-      "name": "Turbo diesel, low and strong",
-      "redline": 4500,
-      "torque_curve": [
-        [1200, 300], [1800, 420], [2500, 440], [3000, 420],
-        [3800, 360], [4500, 290]
-      ]
     }
+  ],
+
+  "vehicles": [
+    {
+      "name": "BMW Z4 E86",
+      "weight": 1325
+    },
+    {
+      "name": "BMW 325Ci E46 (Track Prepped)",
+      "weight": 1290
+    }
+  ],
+
+  "tires": [
+    {
+      "name": "Michelin PS4 (Performance)",
+      "grip": 1.05
+    },
+    {
+      "name": "Toyo R888 (Semi-Slicks/Track)",
+      "grip": 1.25
+    },
+    {
+      "name": "Slicks/Competition",
+      "grip": 1.4
+    }
+
   ]
 }

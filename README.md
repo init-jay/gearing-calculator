@@ -134,3 +134,41 @@ acceleration run, climbing each gear to the shift RPM and then dropping straight
 down to the next gear at the same road speed. Plotting RPM against speed (rather
 than the reverse) makes this a sawtooth: road speed only ever increases through a
 run, so it parameterises the whole path, while a given RPM occurs once per gear.
+
+## Standing start
+
+Given a vehicle weight and a tire grip figure, the calculator times a run from
+rest to 100 km/h — or to 60 mph under imperial units, each being the benchmark
+its readers know. The answer is in seconds either way.
+
+At every road speed the force reaching the road is the smaller of what the engine
+can send there and what the tires can hold:
+
+```
+F_engine = tractive_effort(gear at this speed)
+F_grip   = grip_in_G × mass × 9.80665
+a        = min(F_engine, F_grip) / (mass × spin)
+```
+
+`spin` is the drivetrain's own rotational inertia, expressed as an equivalent
+mass: `1.04 + 0.0025 × overall_ratio²`. It grows with the square of the ratio,
+which is why a shorter gear is not the free acceleration a plain `F = ma` would
+promise. Integrating `dv / a` from rest to the target, and adding the shift dead
+time once per upshift, gives the time.
+
+Two consequences are worth knowing before reading a number off it. In the
+traction-limited region the mass cancels — `grip × m × g / (m × spin)` — so it is
+grip, not weight, that sets the launch; weight only starts to matter once the
+engine, rather than the tires, is the limit. And taking the whole weight as load
+on the driven axle ignores weight distribution and transfer, so the grip cap is
+an optimistic bound rather than a launch model.
+
+**What is not modelled:** aerodynamic drag, rolling resistance, drivetrain
+efficiency losses, and the torque converter. Each needs data the calculator never
+asks for — a frontal area and drag coefficient, a rolling-resistance coefficient,
+an efficiency map, a converter's K-factor — and inventing defaults for them would
+dress a gearing tool up as a vehicle-dynamics sim. Since nothing decelerates the
+car during a shift, dead time simply adds.
+
+Absolute times are therefore optimistic. Comparing two gearsets on one car —
+which is what this calculator is for — they are sound.

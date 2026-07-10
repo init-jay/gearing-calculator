@@ -719,3 +719,212 @@ def test_compute_exposes_the_spread():
     assert len(spread) == 6
     assert set(spread[0]) == {"gear", "from_speed", "to_speed", "share"}
     assert isclose(sum(s["share"] for s in spread), 1.0, rel_tol=1e-12)
+
+
+# --------------------------- acceleration ---------------------------------
+
+# One gear, flat torque: the tractive force is the same at every road speed, so
+# the run has a closed form and the integrator has nowhere to hide.
+FLAT = [(1000, 200.0), (7000, 200.0)]
+
+
+def _spin(ratio, final_drive=3.64, transfer=1.0):
+    """The inertia factor calc applies to the mass in ``a = F/m``."""
+    return 1.04 + 0.0025 * calc.overall_ratio(ratio, final_drive, transfer) ** 2
+
+
+def test_constant_force_matches_the_closed_form_time():
+    # Constant force over a constant mass: t = m_eff * dv / F exactly, and a
+    # midpoint sum of a constant integrand is exact too, so this is not an
+    # approximation — it pins the integrator to the algebra.
+    inputs = calc.Inputs.from_dict({
+        "gears": [1.0], "torque_curve": FLAT, "weight": 1500.0,
+        "grip": 100.0,  # absurd, so grip never caps the engine
+        "shift_time": 0.0,
+    })
+    force = calc.tractive_effort(200.0, 1.0, inputs.final_drive, inputs.transfer, inputs.tire)
+    mass = 1500.0 * _spin(1.0)
+    expected = 80.0 * calc.MPS_PER_KMH * mass / force
+
+    assert isclose(calc.accel_time(inputs, 80.0), expected, rel_tol=1e-12)
+
+
+def test_metric_and_imperial_agree_at_a_common_target_speed():
+    # The same physical car, described twice. 50 mph is 80.4672 km/h, so the two
+    # runs are the same run and must take the same number of seconds.
+    common = {"gears": [3.0, 2.0, 1.4, 1.0], "final_drive": 3.9,
+              "max_rpm": 7000, "grip": 1.1, "shift_time": 0.25}
+    metric = calc.Inputs.from_dict({
+        **common, "units": "metric", "tire": 634.3, "weight": 1400.0, "torque_curve": CURVE,
+    })
+    imperial = calc.Inputs.from_dict({
+        **common, "units": "imperial", "tire": 634.3 / calc.MM_PER_INCH,
+        "weight": 1400.0 / calc.KG_PER_LB,
+        "torque_curve": calc.convert_curve(CURVE, "imperial"),
+    })
+
+    assert isclose(calc.accel_time(metric, 80.4672), calc.accel_time(imperial, 50.0), rel_tol=1e-9)
+
+
+def test_more_weight_is_slower_when_engine_limited():
+    # Grip high enough that the engine, not the tires, is always the limit —
+    # otherwise mass cancels out of a = grip*m*g / (m*spin) and this proves nothing.
+    def run(weight):
+        return calc.accel_time(calc.Inputs.from_dict({
+            "gears": STOCK, "torque_curve": CURVE, "grip": 100.0,
+            "shift_time": 0.0, "weight": weight,
+        }), 100.0)
+
+    assert run(2800.0) > run(1400.0)
+
+
+def test_more_grip_is_quicker_when_traction_limited():
+    # The mirror image: a single tall-geared gear with far more torque than the
+    # tires can take, so grip is the binding constraint the whole way.
+    def run(grip):
+        return calc.accel_time(calc.Inputs.from_dict({
+            "gears": [3.0], "torque_curve": [(1000, 600.0), (7000, 600.0)],
+            "weight": 1400.0, "shift_time": 0.0, "grip": grip,
+        }), 40.0)
+
+    assert run(0.4) < run(0.2)
+
+
+def test_weight_cancels_out_of_a_traction_limited_launch():
+    # a = grip*m*g / (m*spin): the mass divides out. Counter-intuitive, and a
+    # direct consequence of taking the whole weight as load on the driven axle.
+    def run(weight):
+        return calc.accel_time(calc.Inputs.from_dict({
+            "gears": [3.0], "torque_curve": [(1000, 600.0), (7000, 600.0)],
+            "grip": 0.2, "shift_time": 0.0, "weight": weight,
+        }), 40.0)
+
+    assert isclose(run(1000.0), run(2000.0), rel_tol=1e-12)
+
+
+def test_shift_time_adds_exactly_n_times_the_dead_time():
+    # Dead time never touches the integrand — nothing decelerates the car while
+    # the clutch is out — so it comes off the total as clean linear superposition.
+    def inputs(shift_time):
+        return calc.Inputs.from_dict({
+            "gears": STOCK, "torque_curve": CURVE, "weight": 1400.0,
+            "grip": 1.0, "shift_time": shift_time,
+        })
+
+    shifts = calc.acceleration(inputs(0.4)).shifts
+    assert shifts > 0
+    gap = calc.accel_time(inputs(0.4), 100.0) - calc.accel_time(inputs(0.0), 100.0)
+    assert isclose(gap, shifts * 0.4, rel_tol=1e-12)
+
+
+def test_no_torque_curve_has_no_acceleration():
+    # Same contract as `effort_curves`: no engine data, no output to give.
+    inputs = calc.Inputs(gears=STOCK)
+    assert calc.acceleration(inputs) is None
+    assert calc.accel_time(inputs, 100.0) is None
+    assert calc.compute({"gears": STOCK})["acceleration"] is None
+
+
+def test_a_car_that_tops_out_below_the_target_never_arrives():
+    # An engine that runs out of revs in top gear before 100 km/h. The run exists
+    # — there is a curve — but it never finishes, and those are different answers.
+    inputs = calc.Inputs.from_dict({
+        "gears": [12.0], "final_drive": 5.0, "max_rpm": 3000, "torque_curve": FLAT,
+    })
+    accel = calc.acceleration(inputs)
+    assert accel is not None
+    assert accel.time is None
+    assert calc.accel_time(inputs, 100.0) is None
+
+
+def test_acceleration_reports_the_benchmark_target_per_unit_system():
+    metric = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE})
+    imperial = calc.Inputs.from_dict({
+        "gears": STOCK, "units": "imperial", "tire": 634.3 / calc.MM_PER_INCH,
+        "torque_curve": calc.convert_curve(CURVE, "imperial"),
+    })
+    assert calc.acceleration(metric).target_speed == 100.0
+    assert calc.acceleration(imperial).target_speed == 60.0
+
+
+def test_the_traction_limited_region_is_reported():
+    strong = calc.Inputs.from_dict({
+        "gears": STOCK, "torque_curve": CURVE, "weight": 1400.0, "grip": 0.3,
+    })
+    assert calc.acceleration(strong).traction_limited_to > 0.0
+
+    # Grip the tires will never run out of: the engine is the limit from rest.
+    sticky = calc.Inputs.from_dict({
+        "gears": STOCK, "torque_curve": CURVE, "weight": 1400.0, "grip": 100.0,
+    })
+    assert calc.acceleration(sticky).traction_limited_to == 0.0
+    assert calc.acceleration(sticky).traction_limited_gear == 0
+
+
+def test_the_traction_limited_gear_is_the_one_the_speed_falls_in():
+    # The reported gear has to be the gear the shift schedule puts the car in at
+    # the reported speed, or the two halves of the sentence describe different runs.
+    for grip in (0.3, 0.6, 0.9):
+        inputs = calc.Inputs.from_dict({
+            "gears": STOCK, "torque_curve": CURVE, "weight": 1400.0, "grip": grip,
+        })
+        accel = calc.acceleration(inputs)
+        assert accel.traction_limited_to > 0.0
+        assert accel.traction_limited_gear == calc.gear_at_speed(inputs, accel.traction_limited_to)
+
+
+def test_less_grip_stays_traction_limited_into_a_higher_gear():
+    # Halving the grip cannot shorten the grip-limited part of the run.
+    def limited(grip):
+        accel = calc.acceleration(calc.Inputs.from_dict({
+            "gears": STOCK, "torque_curve": CURVE, "weight": 1400.0, "grip": grip,
+        }))
+        return accel.traction_limited_to, accel.traction_limited_gear
+
+    slippery_speed, slippery_gear = limited(0.3)
+    grippy_speed, grippy_gear = limited(0.9)
+    assert slippery_speed > grippy_speed
+    assert slippery_gear >= grippy_gear
+
+
+def test_acceleration_rejects_impossible_vehicles():
+    for bad in ({"weight": 0.0}, {"weight": -1.0}, {"grip": 0.0}, {"grip": -0.5},
+                {"shift_time": -0.1}):
+        with pytest.raises(ValueError):
+            calc.acceleration(calc.Inputs.from_dict({
+                "gears": STOCK, "torque_curve": CURVE, **bad,
+            }))
+
+
+def test_accel_time_rejects_a_nonpositive_target():
+    inputs = calc.Inputs.from_dict({"gears": STOCK, "torque_curve": CURVE})
+    for target in (0.0, -10.0):
+        with pytest.raises(ValueError):
+            calc.accel_time(inputs, target)
+    with pytest.raises(ValueError):
+        calc.accel_time(inputs, 100.0, steps=0)
+
+
+def test_from_dict_defaults_match_the_dataclass():
+    # The browser omits a field only when it means "use the default", so the two
+    # sets of defaults have to agree or the form and the model quietly diverge.
+    bare = calc.Inputs(gears=STOCK)
+    built = calc.Inputs.from_dict({"gears": STOCK})
+    assert (built.weight, built.grip, built.shift_time) == (bare.weight, bare.grip, bare.shift_time)
+
+
+def test_compute_exposes_the_acceleration():
+    accel = calc.compute({"gears": STOCK, "torque_curve": CURVE})["acceleration"]
+    assert set(accel) == {"target_speed", "time", "shifts", "traction_limited_to",
+                          "traction_limited_gear"}
+    assert accel["time"] > 0.0
+
+
+def test_convert_weight_round_trips_through_both_unit_systems():
+    # 1 lb is 0.45359237 kg by definition, and the constant is derived from
+    # NM_PER_LBFT rather than pasted, so this checks the derivation too.
+    assert isclose(calc.convert_weight(1.0, "metric"), 0.45359237, rel_tol=1e-12)
+    assert isclose(calc.convert_weight(calc.convert_weight(1410.0, "imperial"), "metric"),
+                   1410.0, rel_tol=1e-12)
+    with pytest.raises(ValueError):
+        calc.convert_weight(1.0, "furlongs")

@@ -31,6 +31,7 @@ let pyAtSpeed = null;
 let pyTireDiameter = null;
 let pyPowerAtRpm = null;
 let pyConvertCurve = null;
+let pyConvertWeight = null;
 
 /** Latest Python result per active setup key, e.g. `{a: {...}, b: {...}}`. */
 let results = {};
@@ -636,6 +637,46 @@ function renderPeaks(el, series) {
   });
 }
 
+/** 1 -> "1st". Gears run 1..8, so the 11th/12th/13th exceptions cannot arise. */
+const ordinal = (n) => `${n}${["th", "st", "nd", "rd"][n] ?? "th"}`;
+
+/**
+ * The standing-start time, plus the two things that most shape it: how much of
+ * the run the tires rather than the engine limited, and how much of it was spent
+ * shifting rather than accelerating.
+ */
+function renderAccel(el, series) {
+  el.replaceChildren();
+  const compare = series.length > 1;
+  series.forEach((s) => {
+    const a = s.result.acceleration;
+    if (!a) return;
+    const who = compare ? `Setup ${s.label}: ` : "";
+    const unit = s.result.speed_unit;
+    const run = `0–${a.target_speed} ${unit}`;
+
+    const span = document.createElement("span");
+    // Python's None arrives as `undefined`, not null, so test the number itself.
+    if (!Number.isFinite(a.time)) {
+      // Gearing that runs out of revs before the benchmark. Say so; a blank cell
+      // reads as a bug, and a huge number reads as a slow car rather than a wall.
+      span.textContent = `${who}never reaches ${a.target_speed} ${unit}`;
+    } else {
+      const parts = [`${run} ${a.time.toFixed(2)} s`];
+      if (a.shifts > 0) {
+        parts.push(`${a.shifts} shift${a.shifts > 1 ? "s" : ""} costing ` +
+                   `${(a.shifts * s.inputs.shift_time).toFixed(2)} s`);
+      }
+      parts.push(a.traction_limited_to > 0
+        ? `traction-limited at ${a.traction_limited_to.toFixed(0)} ${unit}` +
+          ` in ${ordinal(a.traction_limited_gear)} gear`
+        : "never traction-limited");
+      span.textContent = who + parts.join(" · ");
+    }
+    el.append(span);
+  });
+}
+
 /* --------------------------------- table --------------------------------- */
 
 const cellEl = (tag, text, attrs = {}) => {
@@ -798,8 +839,9 @@ function buildSetupForm(key) {
   setupRoot(key).append(frag);
 
   const root = setupRoot(key);
-  fillPresetSelect(presetSelect(root, "gearbox"), presets.gearboxes);
-  fillPresetSelect(presetSelect(root, "engine"), presets.engines);
+  for (const [kind, group] of Object.entries(PRESET_GROUPS)) {
+    fillPresetSelect(presetSelect(root, kind), presets[group]);
+  }
 }
 
 /**
@@ -851,6 +893,9 @@ function readInputs(root) {
     max_rpm: num(root, "max_rpm", 7000),
     shift_rpm: num(root, "shift_rpm", 7000),
     units: currentUnits(),
+    weight: num(root, "weight", 1400),
+    grip: num(root, "grip", 1.0),
+    shift_time: num(root, "shift_time", 0.3),
     torque_curve: readCurve(root),
   };
 }
@@ -937,9 +982,22 @@ function convertCurve(points, units) {
   }
 }
 
+/** Restate a weight in the other unit system. Scalar in, scalar out: no proxy to free. */
+function convertWeight(value, units) {
+  return pyConvertWeight(value, units);
+}
+
 /* -------------------------------- presets -------------------------------- */
 
 const presetSelect = (root, kind) => root.querySelector(`[data-preset="${kind}"]`);
+
+/** `data-preset` kind -> its array in presets.json. */
+const PRESET_GROUPS = {
+  gearbox: "gearboxes",
+  engine: "engines",
+  vehicle: "vehicles",
+  tire: "tires",
+};
 
 /** Options are indices into `presets`; the empty value means hand-entered. */
 function fillPresetSelect(sel, items) {
@@ -956,12 +1014,13 @@ function markCustom(root, kind) {
 }
 
 function applyPreset(root, sel) {
-  const chosen = presets[sel.dataset.preset === "gearbox" ? "gearboxes" : "engines"][sel.value];
+  const kind = sel.dataset.preset;
+  const chosen = presets[PRESET_GROUPS[kind]][sel.value];
   if (!chosen) return; // re-picking "Custom" keeps whatever is on screen
 
-  if (sel.dataset.preset === "gearbox") {
+  if (kind === "gearbox") {
     buildGearRows(root, chosen.gears);
-  } else {
+  } else if (kind === "engine") {
     // The redline belongs to the engine, so it comes along. Presets are metric.
     const curve = currentUnits() === "metric"
       ? chosen.torque_curve
@@ -971,6 +1030,14 @@ function applyPreset(root, sel) {
     // Keep an earlier shift point if the user chose one; never exceed the redline.
     const shift = num(root, "shift_rpm", chosen.redline);
     field(root, "shift_rpm").value = String(Math.min(shift, chosen.redline));
+  } else if (kind === "vehicle") {
+    // Weights are stored in kg, like torque curves are stored in N·m.
+    const metric = currentUnits() === "metric";
+    const weight = metric ? chosen.weight : convertWeight(chosen.weight, "imperial");
+    field(root, "weight").value = metric ? String(weight) : weight.toFixed(0);
+  } else {
+    // Grip is a lateral G figure: dimensionless, so no unit conversion.
+    field(root, "grip").value = String(chosen.grip);
   }
   recompute();
 }
@@ -985,7 +1052,7 @@ function copySetup(from, to) {
     field(dst, el.dataset.field).value = el.value;
   });
   // Copy the preset names too, or B would read "Custom" while showing A's numbers.
-  for (const kind of ["gearbox", "engine"]) {
+  for (const kind of Object.keys(PRESET_GROUPS)) {
     presetSelect(dst, kind).value = presetSelect(src, kind).value;
   }
 }
@@ -1116,6 +1183,7 @@ function redraw() {
     renderEffortLegend($("#effort-legend"), series);
     renderEngineChart($("#engine-chart"), series);
     renderPeaks($("#engine-peaks"), series);
+    renderAccel($("#accel"), series);
     renderCrossTable($("#cross-table"), series);
   }
 }
@@ -1209,13 +1277,18 @@ function onUnitChange() {
   document.querySelectorAll("[data-power-unit]").forEach((el) => {
     el.textContent = metric ? "kW" : "hp";
   });
+  document.querySelectorAll("[data-weight-unit]").forEach((el) => {
+    el.textContent = metric ? "kg" : "lb";
+  });
 
   // Torque, unlike the tire size, has no unit-agnostic source to re-derive from:
   // the numbers on screen *are* the data, so they have to be restated in place.
   // Both setups convert, even the inactive one, or B would silently keep lb-ft.
+  // Weight is the same story; grip is dimensionless and stays as it is.
   for (const key of SETUP_KEYS) {
     const root = setupRoot(key);
     buildCurveRows(root, convertCurve(readCurve(root), currentUnits()));
+    field(root, "weight").value = convertWeight(num(root, "weight", 1400), currentUnits()).toFixed(0);
   }
 
   recompute();
@@ -1252,6 +1325,8 @@ function wireEvents() {
       if (e.target.classList.contains("gear-input")) markCustom(root, "gearbox");
       else if (e.target.closest("[data-curve-list]") || e.target.dataset.field === "max_rpm")
         markCustom(root, "engine");
+      else if (e.target.dataset.field === "weight") markCustom(root, "vehicle");
+      else if (e.target.dataset.field === "grip") markCustom(root, "tire");
     }
     recompute();
   });
@@ -1326,6 +1401,7 @@ async function main() {
   pyTireDiameter = pyodide.globals.get("tire_diameter");
   pyPowerAtRpm = pyodide.globals.get("power_at_rpm");
   pyConvertCurve = pyodide.globals.get("convert_curve");
+  pyConvertWeight = pyodide.globals.get("convert_weight");
 
   // A fresh setup is the first preset of each, so `presets.json` holds the
   // defaults rather than a second copy of them living here.
@@ -1336,8 +1412,12 @@ async function main() {
     buildCurveRows(root, presets.engines[0].torque_curve);
     field(root, "max_rpm").value = String(presets.engines[0].redline);
     field(root, "shift_rpm").value = String(presets.engines[0].redline);
+    field(root, "weight").value = String(presets.vehicles[0].weight);
+    field(root, "grip").value = String(presets.tires[0].grip);
     presetSelect(root, "gearbox").value = "0";
     presetSelect(root, "engine").value = "0";
+    presetSelect(root, "vehicle").value = "0";
+    presetSelect(root, "tire").value = "0";
   }
   wireEvents();
   recompute();

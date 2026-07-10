@@ -138,6 +138,8 @@
             <svg id="effort-chart" class="chart" viewBox="0 0 640 360" role="img"
                  aria-label="Tractive effort versus road speed, by gear"></svg>
             <div id="effort-legend" class="legend"></div>
+            <!-- The standing-start time is what the curves above add up to. -->
+            <div id="accel" class="legend"></div>
           </details>
 
           <details class="viz" open>
@@ -204,6 +206,29 @@
     <div class="field">
       <label for="tire">Tire diameter <span class="unit" data-tire-unit>mm</span></label>
       <input type="number" id="tire" data-field="tire" value="634.3" readonly />
+    </div>
+
+    <div class="field">
+      <label for="grip">Tire grip <span class="unit">lateral G</span></label>
+      <!-- Dimensionless, so unlike every other figure here it reads the same in
+           both unit systems. Caps the launch: no gearing can push harder than
+           the tires hold. -->
+      <select class="preset" data-preset="tire" aria-label="Tire preset"></select>
+      <input type="number" id="grip" data-field="grip" value="1.0"
+             min="0.1" max="2.5" step="0.05" />
+    </div>
+
+    <div class="field">
+      <label for="weight">Vehicle weight <span class="unit" data-weight-unit>kg</span></label>
+      <select class="preset" data-preset="vehicle" aria-label="Vehicle preset"></select>
+      <input type="number" id="weight" data-field="weight" value="1400"
+             min="1" step="10" />
+    </div>
+
+    <div class="field">
+      <label for="shift_time">Shift dead time <span class="unit">s</span></label>
+      <input type="number" id="shift_time" data-field="shift_time" value="0.3"
+             min="0" max="5" step="0.05" />
     </div>
 
     <div class="field">

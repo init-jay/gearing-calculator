@@ -1076,13 +1076,81 @@ def test_compute_exposes_the_traction_limit():
     assert result["force_unit"] == "N"
 
 
-def test_gears_at_speeds_matches_at_speed_sample_by_sample():
-    # The batch entrypoint is at_speed's gear resolution over a list; the two
-    # must never disagree, or the lap gear map would contradict the gauges.
+def test_gears_at_speeds_matches_at_speed_while_following_the_schedule():
+    # Accelerating (or with no torque curve to hold against), the batch
+    # entrypoint is at_speed's gear resolution over a list; disagreeing there
+    # would make the lap gear map contradict the gauges.
     data = {"gears": STOCK}
     speeds = [0.0, 15.0, 42.5, 60.0, 88.8, 130.0, 220.0, 500.0]
     batch = calc.gears_at_speeds(data, speeds)
     assert batch == [calc.at_speed(data, v)["gear"] for v in speeds]
+
+
+def _hold_scenario():
+    """Speeds bracketing the downshift-hysteresis decision in 4th gear.
+
+    Returns ``(data, v_into_4th, v_cross, v_hold)``: ``v_cross`` is the 3->4
+    tractive-effort crossover — below it 3rd pulls harder than 4th, so the
+    downshift pays — and ``v_hold`` is midway between there and the 3->4
+    shift: scheduled for 3rd, but with 4th still the stronger gear, so
+    nothing to gain by taking the downshift. (``v_cross`` itself is a
+    bisected root, a float knife-edge, so assertions use speeds clearly
+    inside each regime.)
+
+    Uses PEAKY: under CURVE every STOCK pair holds to the redline (the lower
+    gear never stops pulling harder), which leaves no band to hold 4th in.
+    """
+    data = {"gears": STOCK, "torque_curve": PEAKY}
+    inputs = calc.Inputs.from_dict(data)
+    shifts = calc.shift_points(inputs)
+    v_into_4th = shifts[2].speed
+    v_cross = calc.shift_crossovers(inputs)[2].speed
+    # The scenario only bites if the crossover is inside 3rd's scheduled band.
+    assert v_cross < shifts[2].speed
+    return data, v_into_4th, v_cross, (v_cross + v_into_4th) / 2
+
+
+def test_gears_at_speeds_holds_the_gear_while_it_pulls_harder():
+    data, v_into_4th, _, v_hold = _hold_scenario()
+    # Lifting from the 3->4 shift to a speed still above the effort
+    # crossover, 4th is held — even though the schedule (what at_speed
+    # reports) prescribes 3rd there.
+    assert calc.gears_at_speeds(data, [v_into_4th, v_hold]) == [4, 4]
+    assert calc.at_speed(data, v_hold)["gear"] == 3
+
+
+def test_gears_at_speeds_downshifts_where_the_lower_gear_wins():
+    data, v_into_4th, v_cross, _ = _hold_scenario()
+    # Below the crossover 3rd out-pulls 4th, so the downshift happens — and
+    # goes no further, 3rd being the strongest legal gear at that speed.
+    assert calc.gears_at_speeds(data, [v_into_4th, v_cross * 0.99]) == [4, 3]
+
+
+def test_gears_at_speeds_never_downshifts_into_first():
+    data, v_into_4th, _, _ = _hold_scenario()
+    # Braking to walking pace steps down through the crossovers but stops at
+    # 2nd — 1st is a launch gear, not a corner gear.
+    assert calc.gears_at_speeds(data, [v_into_4th, 5.0]) == [4, 2]
+    # 1st still appears where the schedule itself starts a sample there.
+    assert calc.gears_at_speeds(data, [5.0, v_into_4th, 5.0]) == [1, 4, 2]
+    # The driver rule outlives the torque curve: schedule-only decel too.
+    del data["torque_curve"]
+    assert calc.gears_at_speeds(data, [v_into_4th, 5.0]) == [4, 2]
+
+
+def test_gears_at_speeds_without_a_curve_downshifts_on_schedule():
+    # No torque curve -> no peak to hold against -> schedule both ways.
+    data, v_into_4th, _, v_hold = _hold_scenario()
+    del data["torque_curve"]
+    assert calc.gears_at_speeds(data, [v_into_4th, v_hold]) == [4, 3]
+
+
+def test_gears_at_speeds_reaccelerates_out_of_a_held_gear():
+    data, v_into_4th, _, v_hold = _hold_scenario()
+    # Corner exit: the held 4th stays held as speed comes back up, and the
+    # schedule takes over again once it re-enters 4th's own band.
+    got = calc.gears_at_speeds(data, [v_into_4th, v_hold, v_into_4th, v_into_4th * 1.5])
+    assert got == [4, 4, 4, 5]
 
 
 def test_gears_at_speeds_boundary_and_clamp():

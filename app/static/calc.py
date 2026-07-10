@@ -1123,17 +1123,48 @@ def at_speed(data: dict, speed: float) -> dict:
 def gears_at_speeds(data: dict, speeds) -> list:
     """The gear held at each of ``speeds``: dict in, list of 1-based gears out.
 
-    :func:`at_speed` for a whole lap of samples: the shift schedule is resolved
-    once, then each speed is placed against it — same semantics as
-    :func:`gear_at_speed`, including "at a shift speed the shift has already
-    happened". Speeds are in the setup's unit system, like everything else.
+    ``speeds`` is a lap in *sample order* — the result is stateful, not a pure
+    per-speed lookup. Accelerating, the driver follows the shift schedule
+    exactly (same semantics as :func:`gear_at_speed`, including "at a shift
+    speed the shift has just happened"). Decelerating, they hold the current
+    gear until the gear below would actually pull harder — the same
+    tractive-effort crossovers that define the optimal upshifts, read in the
+    other direction — then step down through each crossover as speed falls.
 
-    This models a driver who is always in the gear the schedule prescribes for
-    the current speed, both accelerating and on the way back down — i.e. the
-    downshift happens where the upshift would, which is where the lower gear
-    starts pulling harder again.
+    Holding above the crossover costs nothing (the taller gear is still the
+    stronger one there), and the two thresholds together give the map real
+    hysteresis: up at the schedule's speed, back down only at the crossover
+    below it. The schedule's gear is the floor either way, so a held gear can
+    never be asked for revs the schedule would not allow — but downshifts
+    never take 1st: a braking zone stops at 2nd, because 1st on a moving car
+    is a launch gear, not a corner gear. 1st only appears where the schedule
+    itself starts a sample there.
+
+    Without a usable torque curve there are no effort curves to cross, so the
+    schedule applies in both directions — still never downshifting into 1st.
+    Speeds are in the setup's unit system, like everything else.
     """
     inputs = Inputs.from_dict(data)
     shift_speeds = [s.speed for s in shift_points(inputs)]
     n_gears = len(inputs.gears)
-    return [_gear_from_shifts(shift_speeds, float(v), n_gears) for v in speeds]
+
+    # crossover_speeds[g - 2] is where gear g - 1 starts out-pulling gear g;
+    # decelerating past it in gear g is the moment the downshift pays.
+    crossover_speeds = [c.speed for c in shift_crossovers(inputs)]
+
+    gears = []
+    gear = 0  # below any real gear, so the first sample always follows the schedule
+    for v in speeds:
+        v = float(v)
+        scheduled = _gear_from_shifts(shift_speeds, v, n_gears)
+        if scheduled >= gear:
+            gear = scheduled
+        else:
+            floor = max(scheduled, min(2, n_gears))
+            if not crossover_speeds:
+                gear = floor
+            else:
+                while gear > floor and v < crossover_speeds[gear - 2]:
+                    gear -= 1
+        gears.append(gear)
+    return gears

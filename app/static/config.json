@@ -1,0 +1,10 @@
+{
+  "note": "Where the browser loads the Pyodide runtime from. \"vendored\" serves it from this origin (app/static/pyodide/, ~12 MB, fetched by scripts/vendor_pyodide.py); nothing touches the network and the site works fully offline. \"cdn\" skips vendoring entirely: the deploy carries no runtime, but the site then needs the network on every load and you are trusting a third party to serve code that executes in the page. `version` is the single source of truth — scripts/vendor_pyodide.py reads it, and {version} is substituted into `cdn` — so the two can never drift apart.",
+
+  "pyodide": {
+    "source": "cdn",
+    "version": "0.28.0",
+    "vendored": "pyodide/",
+    "cdn": "https://cdn.jsdelivr.net/pyodide/v{version}/full/"
+  }
+}

@@ -1120,6 +1120,47 @@ function redraw() {
   }
 }
 
+/* ------------------------------ runtime config --------------------------- */
+
+/**
+ * How to fix a failed boot. Empty until the runtime's source is known, because
+ * until then the two failures — no vendored copy, no network — are indist-
+ * inguishable, and guessing sends the reader to the wrong file.
+ */
+let runtimeHint = "";
+
+/**
+ * The base URL Pyodide and its wasm/stdlib payload are fetched from.
+ *
+ * `vendored` keeps every byte on this origin, which is what lets the site run
+ * with no network. `cdn` trades that away for a deploy that carries no 12 MB
+ * runtime. The version is substituted here rather than baked into the URL, so
+ * the CDN cannot drift from the copy `scripts/vendor_pyodide.py` downloads.
+ */
+function pyodideBaseUrl(cfg) {
+  if (cfg.source !== "vendored" && cfg.source !== "cdn") {
+    throw new Error(`config.json: pyodide.source must be "vendored" or "cdn", got "${cfg.source}"`);
+  }
+  runtimeHint =
+    cfg.source === "cdn"
+      ? 'config.json loads Pyodide from a CDN. Check the network, or set <code>pyodide.source</code> to <code>"vendored"</code>.'
+      : "Run <code>uv run scripts/vendor_pyodide.py</code> to fetch the runtime.";
+
+  const base = cfg.source === "cdn" ? cfg.cdn.replace("{version}", cfg.version) : cfg.vendored;
+  return base.endsWith("/") ? base : `${base}/`;
+}
+
+/** Pyodide ships as a classic script that defines `loadPyodide` on `window`. */
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = src;
+    el.onload = () => resolve();
+    el.onerror = () => reject(new Error(`could not load ${src}`));
+    document.head.append(el);
+  });
+}
+
 /* ---------------------------------- init --------------------------------- */
 
 /** Show one setup's form; the other stays in the DOM so its values persist. */
@@ -1267,13 +1308,18 @@ function wireEvents() {
 }
 
 async function main() {
-  const [pyodideInstance, src, presetData] = await Promise.all([
-    loadPyodide({ indexURL: "pyodide/" }),
+  // The runtime's location is itself a fetch, so it cannot be started in
+  // parallel with loading the runtime — but the two payloads can.
+  const [config, src, presetData] = await Promise.all([
+    fetch("config.json").then((r) => r.json()),
     fetch("calc.py").then((r) => r.text()),
     fetch("presets.json").then((r) => r.json()),
   ]);
-  pyodide = pyodideInstance;
   presets = presetData;
+
+  const base = pyodideBaseUrl(config.pyodide);
+  await loadScript(`${base}pyodide.js`);
+  pyodide = await loadPyodide({ indexURL: base });
   pyodide.runPython(src);
   pyCompute = pyodide.globals.get("compute");
   pyAtSpeed = pyodide.globals.get("at_speed");
@@ -1302,6 +1348,7 @@ async function main() {
 
 main().catch((err) => {
   console.error(err);
+  const hint = runtimeHint ? `<br><small>${runtimeHint}</small>` : "";
   $("#loading").innerHTML =
-    `<p role="alert">Failed to start Python.<br><small>${err}</small></p>`;
+    `<p role="alert">Failed to start Python.<br><small>${err}</small>${hint}</p>`;
 });

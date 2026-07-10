@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Download the Pyodide runtime and vendor it into ``app/static/pyodide/``.
 
-The site loads Pyodide from its own origin — nothing is fetched from a CDN at
-runtime — so the runtime has to live on disk. It is too large to commit, so it
-is gitignored and re-fetched with this script:
+Needed only when ``app/static/config.json`` sets ``pyodide.source`` to
+``"vendored"`` (the default), which serves the runtime from this origin so the
+site works with no network. Under ``"cdn"`` the browser fetches it instead and
+this script is unnecessary. The runtime is too large to commit, so it is
+gitignored and re-fetched with:
 
     uv run scripts/vendor_pyodide.py
+
+The version is *not* pinned here. It is read from ``config.json`` — the same
+file the browser reads to build the CDN URL — so the vendored copy and the CDN
+copy cannot end up being different versions of Pyodide.
 
 Standard library only, so it runs before any dependencies are installed.
 """
@@ -13,6 +19,7 @@ Standard library only, so it runs before any dependencies are installed.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 import tarfile
@@ -21,14 +28,20 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Pinned for reproducibility. Bump deliberately.
-DEFAULT_VERSION = "0.28.0"
 RELEASE_URL = (
     "https://github.com/pyodide/pyodide/releases/download/"
     "{version}/pyodide-core-{version}.tar.bz2"
 )
 
-DEST = Path(__file__).resolve().parent.parent / "app" / "static" / "pyodide"
+STATIC = Path(__file__).resolve().parent.parent / "app" / "static"
+CONFIG = STATIC / "config.json"
+DEST = STATIC / "pyodide"
+
+
+def load_config() -> dict:
+    """The ``pyodide`` block of config.json: the one place the version is written."""
+    with CONFIG.open(encoding="utf-8") as fh:
+        return json.load(fh)["pyodide"]
 
 # The loader needs these; the rest of pyodide-core is small enough to keep.
 REQUIRED = ["pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip"]
@@ -48,10 +61,22 @@ def download(url: str, dest: Path) -> None:
 
 
 def main() -> int:
+    config = load_config()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default=DEFAULT_VERSION)
+    parser.add_argument(
+        "--version",
+        default=config["version"],
+        help="override the version pinned in config.json",
+    )
     parser.add_argument("--force", action="store_true", help="re-vendor even if present")
     args = parser.parse_args()
+
+    if config["source"] != "vendored":
+        print(
+            f'note: config.json sets pyodide.source to "{config["source"]}", so the '
+            "browser will not use this copy. Vendoring anyway.",
+            file=sys.stderr,
+        )
 
     if DEST.exists() and not args.force:
         print(f"{DEST} already exists; use --force to re-vendor.")

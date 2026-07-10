@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gearing Calculator</title>
   <link rel="stylesheet" href="styles.css" />
-  <!-- Vendored locally: nothing is fetched from a CDN. -->
-  <script src="pyodide/pyodide.js"></script>
+  <!-- Pyodide is *not* loaded here: app.js injects it from wherever config.json
+       points, either the vendored copy on this origin or a CDN. A script tag
+       naming the vendored path would silently defeat that switch. -->
 </head>
 <body>
   <div id="loading" class="loading">

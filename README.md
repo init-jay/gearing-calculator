@@ -13,8 +13,9 @@ shift schedule and the tachometer sawtooths as each shift lands.
 
 The gearing math is written in Python and **runs in the browser** via
 [Pyodide](https://pyodide.org) (WebAssembly). The FastAPI server only serves
-static files. Everything, including the Pyodide runtime, is served from
-localhost — **nothing is fetched from a CDN**, so the site works fully offline.
+static files. By default the Pyodide runtime is served from this origin too —
+**nothing is fetched from a CDN**, so the site works fully offline. That is a
+[configurable choice](#where-pyodide-comes-from), not a fact of the build.
 
 ## Setup
 
@@ -23,6 +24,31 @@ Vendor the Pyodide runtime once (~12 MB, gitignored):
 ```bash
 uv run scripts/vendor_pyodide.py
 ```
+
+Skip this if you set `pyodide.source` to `"cdn"` — see below.
+
+## Where Pyodide comes from
+
+`app/static/config.json` decides. It is also the only place the Pyodide version
+is written down: the browser reads it to build the runtime URL, and
+`scripts/vendor_pyodide.py` reads it to know what to download, so a vendored copy
+and a CDN copy cannot end up on different releases.
+
+```json
+{ "pyodide": { "source": "vendored", "version": "0.28.0", ... } }
+```
+
+| `source` | Runtime comes from | Trade-off |
+| --- | --- | --- |
+| `"vendored"` (default) | `app/static/pyodide/`, same origin | Works with no network. The deploy carries ~12 MB and you must vendor first. |
+| `"cdn"` | `cdn.jsdelivr.net` | Deploy carries no runtime and needs no vendoring step. Every load needs the network, and a third party serves code that executes in the page. |
+
+Under `"cdn"` you can delete `app/static/pyodide/` entirely — nothing else
+references it. Bump `version` once to move both.
+
+There is deliberately no "CDN with a local fallback". A fallback would mean a
+deploy that looks offline-capable under test and is not, or that silently ships
+12 MB nobody asked for. Pick one; it fails loudly if it can't load.
 
 ## Run
 
@@ -49,9 +75,12 @@ uv run pytest
 | `app/static/calc.py` | All drivetrain math. Pure stdlib Python. |
 | `app/static/app.js` | Boots Pyodide, wires the form, draws the SVG gauges/chart. |
 | `app/static/index.html`, `styles.css` | Page structure and styling. |
+| `app/static/config.json` | Where Pyodide loads from, and the one pinned version. |
+| `app/static/presets.json` | Gearbox ratios and engine torque curves for the dropdowns. |
 | `app/main.py` | FastAPI static-file server. |
-| `scripts/vendor_pyodide.py` | Downloads the pinned Pyodide runtime. |
+| `scripts/vendor_pyodide.py` | Downloads the Pyodide runtime pinned by `config.json`. |
 | `tests/test_calc.py` | Unit tests for `calc.py`. |
+| `tests/test_config.py`, `tests/test_presets.py` | Guard the two data files. |
 
 `calc.py` is the single source of truth for the math: the browser loads it into
 Pyodide, and `tests/test_calc.py` imports the same file directly, so the

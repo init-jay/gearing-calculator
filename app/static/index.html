@@ -183,6 +183,31 @@
         </div>
       </section>
     </div>
+
+    <!-- ------------------------------ lap map ----------------------------- -->
+    <!-- Independent of the gearing inputs above: feed it a RaceChrono Pro CSV
+         export and it draws the GPS trace, shaded by speed. Everything is
+         parsed client-side by lapmap.py inside Pyodide. -->
+    <section class="panel lap-panel" aria-labelledby="lapmap-heading">
+      <h2 id="lapmap-heading">Lap map</h2>
+      <p class="hint">
+        Upload a RaceChrono Pro CSV export (Format 3) to trace a lap from its
+        GPS log, colored by speed. Nothing leaves your browser.
+      </p>
+      <div class="lap-controls">
+        <input type="file" id="lap-file" accept=".csv,text/csv"
+               aria-label="RaceChrono CSV file" />
+        <label id="lap-select-label" hidden>Lap
+          <select id="lap-select"></select>
+        </label>
+      </div>
+      <p id="lap-error" class="lap-error" role="alert" hidden></p>
+      <div id="lap-view" hidden>
+        <svg id="lap-map" class="chart lap-map" viewBox="0 0 640 480" role="img"
+             aria-label="Track map traced from GPS, colored by speed"></svg>
+        <div id="lap-legend" class="legend lap-legend"></div>
+      </div>
+    </section>
   </main>
 
   <!-- Cloned once per setup. Ids are rewritten with the setup key on clone, so

@@ -804,3 +804,46 @@ tbody tr:last-child th { border-bottom: none; }
    a different one. Without comparison the whole row lights up, as it always has. */
 tbody tr.is-current { background: var(--accent-soft); }
 tbody td.is-current { background: var(--accent-soft); }
+
+/* -------------------------------- lap map -------------------------------- */
+/* Sits below the two-column layout grid, so it spans the full page width. */
+.lap-panel { margin-top: 1.5rem; }
+
+.lap-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.lap-controls input[type="file"] { font: inherit; color: var(--muted); }
+
+.lap-error { color: var(--needle); margin: 0.5rem 0; }
+
+/* Wider than tall, unlike the 640x360 gearing charts: track maps are roughly
+   square, and the extra height keeps north-up laps from shrinking. */
+.lap-map { max-width: 48rem; display: block; }
+
+.lap-start { fill: var(--text); stroke: var(--bg); stroke-width: 2; }
+
+/* Ringed with the chart surface so it stays visible on any ramp color. */
+.lap-hover-marker { fill: none; stroke: var(--text); stroke-width: 2; }
+
+.lap-readout { fill: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.lap-legend { display: flex; flex-direction: column; gap: 0.35rem; max-width: 48rem; }
+
+.lap-scale-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lap-scale {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}

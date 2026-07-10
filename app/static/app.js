@@ -32,6 +32,7 @@ let pyTireDiameter = null;
 let pyPowerAtRpm = null;
 let pyConvertCurve = null;
 let pyConvertWeight = null;
+let pyParseRacechrono = null;
 
 /** Latest Python result per active setup key, e.g. `{a: {...}, b: {...}}`. */
 let results = {};
@@ -1127,6 +1128,211 @@ function copySetup(from, to) {
   }
 }
 
+/* -------------------------------- lap map -------------------------------- */
+/*
+ * RaceChrono CSV -> speed-shaded GPS trace. Fully independent of the gearing
+ * setups: its own upload, its own state, never part of recompute()/redraw().
+ * Parsing lives in lapmap.py (loaded into Pyodide beside calc.py); this side
+ * only fits the projected meters into the viewBox and colors the segments.
+ */
+
+const LAP_W = 640;
+const LAP_H = 480;
+const LAP_MARGIN = 24;
+
+/**
+ * Sequential single-hue ramp (blue, steps 100-700). One hue light->dark, so
+ * magnitude reads as ink density rather than a rainbow. The near-minimum end
+ * recedes toward the chart surface: lightest step in light mode, darkest in
+ * dark mode — hence the reversal.
+ */
+const SPEED_RAMP = [
+  "#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5",
+  "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b",
+];
+
+const darkMode = matchMedia("(prefers-color-scheme: dark)");
+
+/** Color for a normalized speed t in [0, 1] under the current color scheme. */
+function speedColor(t) {
+  const ramp = darkMode.matches ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
+  const i = Math.min(ramp.length - 1, Math.max(0, Math.round(t * (ramp.length - 1))));
+  return ramp[i];
+}
+
+/** m/s -> the display unit selected for the rest of the app. */
+const speedInUnits = (mps) =>
+  currentUnits() === "metric" ? mps * 3.6 : mps * 2.2369363;
+const lapSpeedUnit = () => (currentUnits() === "metric" ? "km/h" : "mph");
+
+/** Seconds -> "1:31.29". Laps are minutes long, so hours never arise. */
+function formatLapTime(s) {
+  const m = Math.floor(s / 60);
+  return `${m}:${(s - m * 60).toFixed(2).padStart(5, "0")}`;
+}
+
+/** Upload result plus which lap is on screen. Replaced whole on re-upload. */
+let lapState = { data: null, lapIndex: 0 };
+
+function initLapMap() {
+  $("#lap-file").addEventListener("change", onLapFile);
+  $("#lap-select").addEventListener("change", (e) => {
+    lapState.lapIndex = parseInt(e.target.value, 10);
+    renderLapSection();
+  });
+  // The ramp direction is baked into stroke attributes, not CSS variables, so
+  // a scheme flip has to redraw rather than restyle.
+  darkMode.addEventListener("change", () => {
+    if (lapState.data) renderLapSection();
+  });
+}
+
+async function onLapFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const errEl = $("#lap-error");
+  try {
+    const text = await file.text();
+    lapState = { data: callPyArgs(pyParseRacechrono, text), lapIndex: 0 };
+  } catch (err) {
+    lapState = { data: null, lapIndex: 0 };
+    // Pyodide wraps the ValueError in a traceback; the message is on its
+    // last non-empty line, reading e.g. "ValueError: Missing column(s): ...".
+    const lines = String(err.message ?? err).trim().split("\n");
+    errEl.textContent = lines[lines.length - 1].replace(/^ValueError:\s*/, "");
+    errEl.hidden = false;
+    $("#lap-view").hidden = true;
+    $("#lap-select-label").hidden = true;
+    return;
+  }
+  errEl.hidden = true;
+  lapState.lapIndex = defaultLapIndex(lapState.data.laps);
+  buildLapSelect(lapState.data.laps);
+  renderLapSection();
+}
+
+/** Fastest complete lap; a file with no complete laps falls back to the one
+ * with the most GPS points (the most track drawn). */
+function defaultLapIndex(laps) {
+  let best = -1;
+  laps.forEach((lap, i) => {
+    if (lap.complete && (best < 0 || lap.duration < laps[best].duration)) best = i;
+  });
+  if (best >= 0) return best;
+  laps.forEach((lap, i) => {
+    if (best < 0 || lap.x.length > laps[best].x.length) best = i;
+  });
+  return best;
+}
+
+function buildLapSelect(laps) {
+  const select = $("#lap-select");
+  select.replaceChildren();
+  laps.forEach((lap, i) => {
+    const label = `Lap ${lap.lap} — ${formatLapTime(lap.duration)}` +
+                  (lap.complete ? "" : " (partial)");
+    select.append(new Option(label, String(i), false, i === lapState.lapIndex));
+  });
+  $("#lap-select-label").hidden = laps.length < 2;
+}
+
+function renderLapSection() {
+  const lap = lapState.data?.laps[lapState.lapIndex];
+  if (!lap) return;
+  $("#lap-view").hidden = false;
+  renderLapMap($("#lap-map"), lap);
+  renderLapLegend($("#lap-legend"), lap);
+}
+
+function renderLapMap(svg, lap) {
+  svg.replaceChildren();
+
+  // Fit the lap's meters into the viewBox, uniform scale, centered. SVG y
+  // grows downward while the projection's grows northward, so y flips.
+  const xMin = Math.min(...lap.x), xMax = Math.max(...lap.x);
+  const yMin = Math.min(...lap.y), yMax = Math.max(...lap.y);
+  const span = Math.max(xMax - xMin, yMax - yMin, 1e-9);
+  const scale = Math.min(LAP_W - 2 * LAP_MARGIN, LAP_H - 2 * LAP_MARGIN) / span;
+  const xOff = (LAP_W - (xMax - xMin) * scale) / 2;
+  const yOff = (LAP_H - (yMax - yMin) * scale) / 2;
+  const px = (x) => xOff + (x - xMin) * scale;
+  const py = (y) => LAP_H - yOff - (y - yMin) * scale;
+
+  // SVG has no per-vertex gradient on a polyline, so the shading is one short
+  // <line> per sample pair; round caps make the joins seamless.
+  const range = lap.speed_max - lap.speed_min;
+  const g = svgEl("g", { class: "lap-trace" });
+  for (let i = 1; i < lap.x.length; i++) {
+    const v = (lap.speed[i - 1] + lap.speed[i]) / 2;
+    const t = range > 0 ? (v - lap.speed_min) / range : 0.5;
+    g.append(svgEl("line", {
+      x1: px(lap.x[i - 1]), y1: py(lap.y[i - 1]),
+      x2: px(lap.x[i]), y2: py(lap.y[i]),
+      stroke: speedColor(t),
+      "stroke-width": 5,
+      "stroke-linecap": "round",
+    }));
+  }
+  svg.append(g);
+  svg.append(svgEl("circle", {
+    class: "lap-start", cx: px(lap.x[0]), cy: py(lap.y[0]), r: 6,
+  }));
+
+  // Hover: nearest sample by squared distance (a linear scan over <= ~1200
+  // points), marked on the trace with the speed/time read out at the top.
+  const marker = svgEl("circle", { class: "lap-hover-marker", r: 7 });
+  const readout = svgEl("text", {
+    class: "lap-readout", x: LAP_MARGIN, y: LAP_MARGIN - 6,
+  });
+  marker.style.display = "none";
+  svg.append(marker, readout);
+
+  svg.onpointermove = (e) => {
+    const rect = svg.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * LAP_W;
+    const my = ((e.clientY - rect.top) / rect.height) * LAP_H;
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < lap.x.length; i++) {
+      const d = (px(lap.x[i]) - mx) ** 2 + (py(lap.y[i]) - my) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    marker.setAttribute("cx", px(lap.x[best]));
+    marker.setAttribute("cy", py(lap.y[best]));
+    marker.style.display = "";
+    readout.textContent =
+      `${speedInUnits(lap.speed[best]).toFixed(0)} ${lapSpeedUnit()} · ` +
+      `${formatLapTime(lap.t[best])}`;
+  };
+  svg.onpointerleave = () => {
+    marker.style.display = "none";
+    readout.textContent = "";
+  };
+}
+
+function renderLapLegend(el, lap) {
+  el.replaceChildren();
+
+  const title = document.createElement("span");
+  const where = lapState.data.track || lapState.data.session;
+  title.textContent = `${where ? where + " — " : ""}Lap ${lap.lap}, ` +
+                      `${formatLapTime(lap.duration)}` +
+                      (lap.complete ? "" : " (partial)");
+
+  const scale = document.createElement("div");
+  scale.className = "lap-scale-row";
+  const lo = document.createElement("span");
+  lo.textContent = `${speedInUnits(lap.speed_min).toFixed(0)} ${lapSpeedUnit()}`;
+  const hi = document.createElement("span");
+  hi.textContent = `${speedInUnits(lap.speed_max).toFixed(0)} ${lapSpeedUnit()}`;
+  const bar = document.createElement("div");
+  bar.className = "lap-scale";
+  const ramp = darkMode.matches ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
+  bar.style.background = `linear-gradient(to right, ${ramp.join(", ")})`;
+  scale.append(lo, bar, hi);
+
+  el.append(title, scale);
+}
+
 /* ------------------------------ python bridge ---------------------------- */
 
 /** Call a Python function with a JS object argument, converting both ways. */
@@ -1138,6 +1344,18 @@ function callPy(fn, inputs, ...rest) {
     return proxy.toJs({ dict_converter: Object.fromEntries });
   } finally {
     pyIn.destroy();
+    if (proxy) proxy.destroy();
+  }
+}
+
+/** Call a Python function with positional scalar/string args (which Pyodide
+ * converts implicitly, unlike the object `callPy` wraps with `toPy`). */
+function callPyArgs(fn, ...args) {
+  let proxy;
+  try {
+    proxy = fn(...args);
+    return proxy.toJs({ dict_converter: Object.fromEntries });
+  } finally {
     if (proxy) proxy.destroy();
   }
 }
@@ -1372,6 +1590,9 @@ function onUnitChange() {
     slider.value = String(Math.min(scaled, parseFloat(slider.max)));
     redraw();
   }
+
+  // The lap map legend/readout quote speeds in the selected unit too.
+  if (lapState.data) renderLapSection();
 }
 
 /** Once the user commits a shift RPM, pull it back under that setup's redline. */
@@ -1450,15 +1671,18 @@ function wireEvents() {
 
   // Only moves the needles/markers along the traces; the curves are unchanged.
   $("#cur_speed").addEventListener("input", redraw);
+
+  initLapMap();
 }
 
 async function main() {
   // The runtime's location is itself a fetch, so it cannot be started in
   // parallel with loading the runtime — but the two payloads can.
-  const [config, src, presetData] = await Promise.all([
+  const [config, src, presetData, lapmapSrc] = await Promise.all([
     fetch("config.json").then((r) => r.json()),
     fetch("calc.py").then((r) => r.text()),
     fetch("presets.json").then((r) => r.json()),
+    fetch("lapmap.py").then((r) => r.text()),
   ]);
   validatePresets(presetData);
   presets = presetData;
@@ -1473,6 +1697,8 @@ async function main() {
   pyPowerAtRpm = pyodide.globals.get("power_at_rpm");
   pyConvertCurve = pyodide.globals.get("convert_curve");
   pyConvertWeight = pyodide.globals.get("convert_weight");
+  pyodide.runPython(lapmapSrc);
+  pyParseRacechrono = pyodide.globals.get("parse_racechrono");
 
   // A fresh setup is the first preset of each, so `presets.json` holds the
   // defaults rather than a second copy of them living here.

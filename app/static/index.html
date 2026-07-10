@@ -4,6 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gearing Calculator</title>
+  <!-- Both drawn by scripts/make_favicon.py from one gear profile. Browsers that
+       understand the SVG take it and stay crisp at any size; the rest fall back to
+       the .ico, which is also what a bare /favicon.ico request gets. -->
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
   <!-- Pyodide is *not* loaded here: app.js injects it from wherever config.json
        points, either the vendored copy on this origin or a CDN. A script tag

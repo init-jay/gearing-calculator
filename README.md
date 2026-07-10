@@ -77,10 +77,13 @@ uv run pytest
 | `app/static/index.html`, `styles.css` | Page structure and styling. |
 | `app/static/config.json` | Where Pyodide loads from, and the one pinned version. |
 | `app/static/presets.json` | Gearbox ratios and engine torque curves for the dropdowns. |
+| `app/static/favicon.ico`, `favicon.svg` | Gear icon, generated — edit the profile, not the files. |
 | `app/main.py` | FastAPI static-file server. |
 | `scripts/vendor_pyodide.py` | Downloads the Pyodide runtime pinned by `config.json`. |
+| `scripts/make_favicon.py` | Draws both favicons from one gear profile (stdlib only). |
 | `tests/test_calc.py` | Unit tests for `calc.py`. |
 | `tests/test_config.py`, `tests/test_presets.py` | Guard the two data files. |
+| `tests/test_favicon.py` | Checks the icons still match the script that draws them. |
 
 `calc.py` is the single source of truth for the math: the browser loads it into
 Pyodide, and `tests/test_calc.py` imports the same file directly, so the

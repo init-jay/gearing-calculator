@@ -250,6 +250,16 @@ class ShiftPoint:
 
 
 @dataclass
+class GearSpan:
+    """The slice of the 0-to-top-speed range one gear covers."""
+
+    gear: int
+    from_speed: float
+    to_speed: float
+    share: float  # fraction of the whole range, so the shares sum to 1
+
+
+@dataclass
 class EffortCurve:
     """Tractive-force-vs-speed samples for a single gear."""
 
@@ -422,6 +432,38 @@ def shift_trace(inputs: Inputs) -> list[tuple[float, float]]:
     return trace
 
 
+def gear_spread(inputs: Inputs) -> list[GearSpan]:
+    """How the 0-to-top-speed range is divided between the gears.
+
+    A gear is in use from the upshift that engaged it to the upshift that leaves
+    it, so the spans are exactly the gaps between the shift speeds, with 0 at one
+    end and the top gear's top speed at the other. They tile the range without
+    overlap, so ``share`` sums to 1.
+
+    This says nothing about acceleration and everything about *coverage*: a first
+    gear that spans 15% of the range is doing a lot of the work of getting the car
+    to speed, and a tall sixth that spans 40% will feel lazy in the middle of it.
+
+    Boundaries follow the shift RPM, but the last span runs out to the redline —
+    the top gear has nothing to shift into, exactly as in :func:`shift_trace`.
+    Ratios entered out of order can make a shift speed exceed the next one; such a
+    gear is reported as covering nothing rather than a negative share.
+    """
+    if not inputs.gears:
+        return []
+    top = max(_speed(inputs, inputs.max_rpm, ratio) for ratio in inputs.gears)
+    if top <= 0:
+        return []
+
+    edges = [0.0] + [s.speed for s in shift_points(inputs)] + [top]
+    spans: list[GearSpan] = []
+    for i in range(len(inputs.gears)):
+        low = min(edges[i], top)
+        high = min(max(edges[i + 1], low), top)
+        spans.append(GearSpan(i + 1, low, high, (high - low) / top))
+    return spans
+
+
 def _effort(inputs: Inputs, ratio: float, rpm: float) -> float:
     """Tractive force in one gear at one engine speed, bound to ``inputs``."""
     return tractive_effort(
@@ -573,6 +615,7 @@ class Result:
     shift_rpm: float
     shifts: list[ShiftPoint]
     trace: list[tuple[float, float]]
+    spread: list[GearSpan] = field(default_factory=list)
     # All empty when no torque curve was supplied.
     engine: list[tuple[float, float, float]] = field(default_factory=list)
     efforts: list[EffortCurve] = field(default_factory=list)
@@ -612,6 +655,15 @@ class Result:
                 for s in self.shifts
             ],
             "trace": self.trace,
+            "spread": [
+                {
+                    "gear": g.gear,
+                    "from_speed": g.from_speed,
+                    "to_speed": g.to_speed,
+                    "share": g.share,
+                }
+                for g in self.spread
+            ],
             "engine": self.engine,
             "efforts": [
                 {"gear": e.gear, "ratio": e.ratio, "samples": e.samples} for e in self.efforts
@@ -683,6 +735,7 @@ def gear_table(inputs: Inputs, step: float = 250.0) -> Result:
         shift_rpm=inputs.effective_shift_rpm(),
         shifts=shift_points(inputs),
         trace=shift_trace(inputs),
+        spread=gear_spread(inputs),
         engine=engine,
         efforts=efforts,
         crossovers=shift_crossovers(inputs),

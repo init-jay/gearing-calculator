@@ -326,16 +326,12 @@ function drawFrame(svg, { W, H, M, xMax, yMax, xTitle, yTitle, y2Max = 0, y2Titl
  */
 function renderChart(svg, series, speed) {
   const compare = series.length > 1;
-  const W = 640;
-  const H = 360;
-  // Every gear curve tops out at max RPM, so the top margin has to clear the
-  // gear numbers printed above where each one ends.
-  const M = { top: 24, right: 16, bottom: 44, left: 52 };
+  const { W, H, M, X_HEADROOM } = CHART;
 
   // Road speed runs along X because it increases monotonically through a run,
   // so the shift trace reads left-to-right as a sawtooth. Both axes span the
   // union of the setups, so the two runs share one frame of reference.
-  const xMax = Math.max(...series.map((s) => s.result.max_speed)) * 1.05 || 1;
+  const xMax = Math.max(...series.map((s) => s.result.max_speed)) * X_HEADROOM || 1;
   const yMax = Math.max(...series.map((s) => s.result.max_rpm));
 
   const { xPix, yPix } = drawFrame(svg, {
@@ -407,6 +403,95 @@ function renderLegend(el, series) {
     note.textContent = "Gear curves hidden while comparing";
     el.append(note);
   }
+}
+
+/* --------------------------- rpm-vs-speed chart -------------------------- */
+
+/**
+ * Geometry of the RPM-vs-Speed plot. Shared with the gear-spread bar above it so
+ * the two line up: both are drawn at the same width and origin, and the bar's
+ * full width is the same road speed as the chart's rightmost gridline region.
+ * `M.top` clears the gear numbers printed above where each curve ends.
+ */
+const CHART = {
+  W: 640,
+  H: 360,
+  M: { top: 24, right: 16, bottom: 44, left: 52 },
+  X_HEADROOM: 1.05, // a little air past the top speed, so the trace's end is visible
+};
+
+/* ------------------------------ gear spread ------------------------------ */
+
+// Amber for setup A, blue for B, as everywhere else. Successive gears fade so a
+// six-speed's bands stay tellable apart beyond the separators between them.
+const SPREAD_RGB = { a: "245, 161, 29", b: "59, 154, 225" };
+const SPREAD_MIN_ALPHA = 0.45;
+
+// Below this share a band is too narrow for its percentage; the gear number and
+// the `title` still fit.
+const SPREAD_LABEL_SHARE = 0.08;
+
+/**
+ * A bar showing which slice of 0-to-top-speed each gear covers.
+ *
+ * Bars are drawn against the *union* top speed rather than each setup's own, so
+ * a slower setup's bar ends short and the two can be read against each other —
+ * and against the speed axis of the chart directly below.
+ */
+function renderSpread(el, series) {
+  el.replaceChildren();
+  const compare = series.length > 1;
+  const unit = series[0].result.speed_unit;
+  const top = Math.max(...series.map((s) => s.result.max_speed));
+  if (!(top > 0)) return;
+
+  // Inset the bars to the chart's plot box, and end them where the chart puts the
+  // top speed, so a gear's band sits directly over the speeds it covers below.
+  const pct = (v) => `${(v / CHART.W) * 100}%`;
+  const plotW = CHART.W - CHART.M.left - CHART.M.right;
+  el.style.setProperty("--plot-left", pct(CHART.M.left));
+  el.style.setProperty("--plot-width", pct(plotW / CHART.X_HEADROOM));
+
+  const caption = document.createElement("p");
+  caption.className = "spread-caption";
+  caption.textContent = `Share of 0–${Math.round(top)} ${unit} covered by each gear`;
+  el.append(caption);
+
+  series.forEach((s) => {
+    const row = document.createElement("div");
+    row.className = "spread-row";
+
+    if (compare) {
+      const tag = document.createElement("span");
+      tag.className = `spread-tag spread-tag-${s.key}`;
+      tag.textContent = s.label;
+      row.append(tag);
+    }
+
+    const bar = document.createElement("div");
+    bar.className = "spread-bar";
+    const gears = s.result.spread.length;
+
+    s.result.spread.forEach((span, i) => {
+      const seg = document.createElement("div");
+      seg.className = "spread-seg";
+      // Widths are a share of the union top speed, not of this setup's own, so
+      // the bar of a slower setup genuinely stops short of the full width.
+      seg.style.flex = `0 0 ${((span.to_speed - span.from_speed) / top) * 100}%`;
+      const fade = gears > 1 ? i / (gears - 1) : 0;
+      seg.style.background = `rgba(${SPREAD_RGB[s.key]}, ${1 - (1 - SPREAD_MIN_ALPHA) * fade})`;
+
+      const pct = Math.round(span.share * 100);
+      seg.title =
+        `Gear ${span.gear}: ${span.from_speed.toFixed(1)}–${span.to_speed.toFixed(1)} ${unit}` +
+        ` (${pct}% of the range)`;
+      seg.textContent = span.share >= SPREAD_LABEL_SHARE ? `${span.gear} · ${pct}%` : String(span.gear);
+      bar.append(seg);
+    });
+
+    row.append(bar);
+    el.append(row);
+  });
 }
 
 /* ---------------------------- tractive effort ---------------------------- */
@@ -1015,6 +1100,7 @@ function redraw() {
     row.toggleAttribute("data-over", s.at.rpm > s.inputs.max_rpm + 0.5);
   }
 
+  renderSpread($("#spread"), series);
   renderChart($("#chart"), series, speed);
   renderLegend($("#legend"), series);
   renderTable($("#table"), series);

@@ -620,3 +620,102 @@ def test_at_speed_operating_point_walks_up_the_curve_with_speed():
     rpms = [calc.at_speed(data, top * f)["rpm"] for f in (0.6, 0.7, 0.8, 0.9)]
     assert rpms == sorted(rpms)
     assert all(calc.at_speed(data, top * f)["torque"] is not None for f in (0.6, 0.9))
+
+
+# ---------------------------- gear spread ---------------------------------
+
+
+def test_spread_tiles_the_whole_range():
+    inputs = calc.Inputs.from_dict({"gears": STOCK})
+    spans = calc.gear_spread(inputs)
+    assert [s.gear for s in spans] == [1, 2, 3, 4, 5, 6]
+    assert spans[0].from_speed == 0.0
+    # Each span picks up exactly where the last one stopped.
+    for a, b in zip(spans, spans[1:]):
+        assert isclose(a.to_speed, b.from_speed, rel_tol=1e-12)
+    assert isclose(sum(s.share for s in spans), 1.0, rel_tol=1e-12)
+
+
+def test_spread_ends_at_the_reported_top_speed():
+    data = {"gears": STOCK}
+    spans = calc.gear_spread(calc.Inputs.from_dict(data))
+    assert isclose(spans[-1].to_speed, calc.compute(data)["max_speed"], rel_tol=1e-12)
+
+
+def test_spread_boundaries_are_the_shift_speeds():
+    inputs = calc.Inputs.from_dict({"gears": STOCK})
+    shifts = calc.shift_points(inputs)
+    spans = calc.gear_spread(inputs)
+    for shift, span in zip(shifts, spans):
+        assert isclose(span.to_speed, shift.speed, rel_tol=1e-12)
+
+
+def test_spread_share_is_the_span_over_the_top_speed():
+    inputs = calc.Inputs.from_dict({"gears": STOCK})
+    spans = calc.gear_spread(inputs)
+    top = spans[-1].to_speed
+    for s in spans:
+        assert isclose(s.share, (s.to_speed - s.from_speed) / top, rel_tol=1e-12)
+
+
+def test_a_single_gear_covers_everything():
+    spans = calc.gear_spread(calc.Inputs.from_dict({"gears": [3.0]}))
+    assert len(spans) == 1
+    assert spans[0].from_speed == 0.0
+    assert isclose(spans[0].share, 1.0, rel_tol=1e-12)
+
+
+def test_spread_is_unit_agnostic():
+    # The same drivetrain in either unit system divides the range identically:
+    # every boundary is a ratio of speeds, and the units cancel.
+    metric = calc.gear_spread(calc.Inputs.from_dict({"gears": STOCK, "tire": 635.0}))
+    imperial = calc.gear_spread(
+        calc.Inputs.from_dict({"gears": STOCK, "tire": 25.0, "units": "imperial"})
+    )
+    for a, b in zip(metric, imperial):
+        assert isclose(a.share, b.share, rel_tol=1e-9)
+
+
+def test_shifting_early_shrinks_every_gear_but_the_last():
+    # Upshifting below the redline hands road speed to the next gear up, so the
+    # intermediate gears cover less and the top gear — which still runs to the
+    # limiter — picks up the slack.
+    late = calc.gear_spread(calc.Inputs.from_dict({"gears": STOCK, "shift_rpm": 7000}))
+    early = calc.gear_spread(calc.Inputs.from_dict({"gears": STOCK, "shift_rpm": 5000}))
+    assert all(e.share < l.share for e, l in zip(early[:-1], late[:-1]))
+    assert early[-1].share > late[-1].share
+    assert isclose(sum(s.share for s in early), 1.0, rel_tol=1e-12)
+
+
+def test_a_taller_top_gear_covers_more_of_the_range():
+    short = calc.gear_spread(calc.Inputs.from_dict({"gears": [3.0, 2.0, 1.0]}))
+    tall = calc.gear_spread(calc.Inputs.from_dict({"gears": [3.0, 2.0, 0.7]}))
+    assert tall[-1].share > short[-1].share
+
+
+def test_spread_of_a_real_gearbox_matches_a_hand_calc():
+    # Boundaries are shift_rpm * (1/ratio), so a gear's share is the gap between
+    # consecutive 1/ratio values over the top gear's 1/ratio — the tire, diff and
+    # units all cancel. The last gear also gains the run from shift_rpm to redline.
+    gears = [3.0, 2.0, 1.0]
+    inputs = calc.Inputs.from_dict({"gears": gears, "shift_rpm": 6000, "max_rpm": 6000})
+    spans = calc.gear_spread(inputs)
+    inv = [1 / g for g in gears]
+    top = inv[-1]
+    expected = [inv[0] / top, (inv[1] - inv[0]) / top, (inv[2] - inv[1]) / top]
+    for span, want in zip(spans, expected):
+        assert isclose(span.share, want, rel_tol=1e-12)
+
+
+def test_out_of_order_gears_never_report_a_negative_share():
+    # A gear list entered backwards makes a shift speed exceed the next one.
+    spans = calc.gear_spread(calc.Inputs.from_dict({"gears": [1.0, 2.0, 3.0]}))
+    assert all(s.share >= 0.0 for s in spans)
+    assert all(s.to_speed >= s.from_speed for s in spans)
+
+
+def test_compute_exposes_the_spread():
+    spread = calc.compute({"gears": STOCK})["spread"]
+    assert len(spread) == 6
+    assert set(spread[0]) == {"gear", "from_speed", "to_speed", "share"}
+    assert isclose(sum(s["share"] for s in spread), 1.0, rel_tol=1e-12)

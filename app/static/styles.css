@@ -518,6 +518,60 @@ fieldset.units label {
   border-radius: 8px;
 }
 
+/* ----------------------------- gear spread ------------------------------ */
+.spread { margin-bottom: 0.9rem; }
+
+.spread-caption {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Inset to the chart's plot box (see CHART in app.js), so a gear's band sits
+   directly above the stretch of the speed axis it covers. */
+.spread-row {
+  position: relative;
+  width: var(--plot-width, 100%);
+  margin: 0 0 0.3rem var(--plot-left, 0);
+}
+
+/* Lives in the chart's left margin, beside the bar rather than shortening it. */
+.spread-tag {
+  position: absolute;
+  right: 100%;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-right: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.spread-tag-a { color: var(--dial-amber); }
+.spread-tag-b { color: var(--dial-blue); }
+
+.spread-bar { display: flex; height: 1.5rem; }
+
+/* Near-black ink: the bands are amber or blue in both colour schemes, so the
+   label cannot take its colour from the theme. */
+.spread-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 2px solid var(--panel);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--dial-face-edge);
+}
+
+.spread-seg:first-child { border-radius: 3px 0 0 3px; }
+.spread-seg:last-child { border-right: none; border-radius: 0 3px 3px 0; }
+
 /* -------------------------------- chart --------------------------------- */
 .chart {
   width: 100%;

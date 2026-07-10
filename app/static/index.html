@@ -11,16 +11,28 @@
 </head>
 <body>
   <div id="loading" class="loading">
-    <div class="spinner" aria-hidden="true"></div>
-    <p>Loading Python…</p>
+    <!-- A six-speed gate. The knob walks 1-2-3-4-5-6 and back down again, which
+         takes about as long as Pyodide does to come up. -->
+    <svg class="shifter" viewBox="0 0 120 102" aria-hidden="true">
+      <path class="shifter-gate" d="M20 15V85M60 15V85M100 15V85M20 50H100" />
+      <g class="shifter-labels">
+        <text x="20" y="9">1</text>
+        <text x="60" y="9">3</text>
+        <text x="100" y="9">5</text>
+        <text x="20" y="96">2</text>
+        <text x="60" y="96">4</text>
+        <text x="100" y="96">6</text>
+      </g>
+      <circle class="shifter-knob" r="8" />
+    </svg>
+    <p role="status">Shifting gears…</p>
   </div>
 
   <main id="app" hidden>
     <header class="page-header">
       <h1>Gearing Calculator</h1>
       <p class="subtitle">
-        Engine RPM ↔ road speed through the drivetrain. Math runs in Python,
-        in your browser.
+        Gearbox, Diff, Engine simulator. Helps you figure out RPM, road speed and optimal shift points.
       </p>
     </header>
 

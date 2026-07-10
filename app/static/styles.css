@@ -65,19 +65,58 @@ body {
   color: var(--muted);
 }
 
-.spinner {
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.shifter { width: 9rem; height: auto; }
+
+.shifter-gate {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+.shifter-labels text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+/* Ringed in the page colour so it reads as sitting *in* the gate, not on it. */
+.shifter-knob {
+  fill: var(--dial-amber);
+  stroke: var(--bg);
+  stroke-width: 2;
+  animation: shift 6.5s ease-in-out infinite alternate;
+}
+
+/*
+ * The knob's path through a six-speed gate. Each gear is two keyframes — arrive,
+ * then dwell — and every move between them goes through the gate at y=50, because
+ * that is the only way across a real H-pattern.
+ *
+ * `alternate` runs it backwards on the return leg, which traces a plausible
+ * downshift rather than teleporting from 6th back to 1st.
+ */
+@keyframes shift {
+  0%,   6%  { transform: translate(20px, 15px); }  /* 1st */
+  12%       { transform: translate(20px, 50px); }
+  18%, 24%  { transform: translate(20px, 85px); }  /* 2nd */
+  30%       { transform: translate(20px, 50px); }
+  34%       { transform: translate(60px, 50px); }  /* across the gate */
+  40%, 46%  { transform: translate(60px, 15px); }  /* 3rd */
+  52%       { transform: translate(60px, 50px); }
+  58%, 64%  { transform: translate(60px, 85px); }  /* 4th */
+  70%       { transform: translate(60px, 50px); }
+  74%       { transform: translate(100px, 50px); }
+  80%, 86%  { transform: translate(100px, 15px); } /* 5th */
+  92%       { transform: translate(100px, 50px); }
+  97%, 100% { transform: translate(100px, 85px); } /* 6th */
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; }
+  /* Parked in neutral. */
+  .shifter-knob { animation: none; transform: translate(60px, 50px); }
 }
 
 /* -------------------------------- layout -------------------------------- */

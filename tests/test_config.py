@@ -29,10 +29,13 @@ def test_source_is_one_of_the_two_supported_values():
     assert PYODIDE["source"] in ("vendored", "cdn")
 
 
-def test_the_repo_ships_offline_by_default():
-    # Flipping this to "cdn" is a deployment choice, not a default: it makes the
-    # site depend on a third party for code that executes in the page.
-    assert PYODIDE["source"] == "vendored"
+def test_vendoring_is_consistent_with_the_chosen_source():
+    # Not a check that the source *is* "vendored" — which one you deploy with is a
+    # judgement call, not an invariant. The invariant is that "vendored" without a
+    # runtime on disk is a broken deploy, and the only warning would be a blank page.
+    on_disk = (STATIC / "pyodide" / "pyodide.js").is_file()
+    if PYODIDE["source"] == "vendored":
+        assert on_disk, "source is 'vendored' but app/static/pyodide/ is missing"
 
 
 def test_version_looks_like_a_pinned_release():

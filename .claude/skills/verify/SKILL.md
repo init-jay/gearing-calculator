@@ -46,6 +46,12 @@ Gotchas learned the hard way:
   real 19-column header including duplicate `speed` columns), then check
   `#lap-view` unhides, `.lap-trace line` count, `#lap-select` options,
   `#lap-legend` text, hover readout, and a garbage upload showing `#lap-error`.
+- Lap gear maps: check `input[name="lap-color"][value="gear"]`, then `#compare`
+  → two figures in `#lap-maps` captioned Setup A/B. Gearbox preset selects are
+  `#setup-b select[data-preset="gearbox"]` — note option index 1 is preset "0"
+  (the seeded default, index 0 is "Custom"), so pick value "2"+ to actually
+  change B. Diff the two maps' `.lap-trace line` stroke arrays to prove the
+  gearsets diverge.
 
 ## Unit tests (CI's job, not verification)
 

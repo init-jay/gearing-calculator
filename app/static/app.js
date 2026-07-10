@@ -33,6 +33,7 @@ let pyPowerAtRpm = null;
 let pyConvertCurve = null;
 let pyConvertWeight = null;
 let pyParseRacechrono = null;
+let pyGearsAtSpeeds = null;
 
 /** Latest Python result per active setup key, e.g. `{a: {...}, b: {...}}`. */
 let results = {};
@@ -1151,6 +1152,19 @@ const SPEED_RAMP = [
   "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b",
 ];
 
+/**
+ * Categorical palette for the gear-shaded maps, indexed by gear - 1. Identity,
+ * not magnitude: "3rd" is a thing you are in, not a level of something, and
+ * adjacent gears must be tellable apart at a glance — a ramp would smear them.
+ * Fixed slot order (the order *is* the colorblind-safety mechanism); the dark
+ * column is the same hues re-stepped for the dark surface, not a new palette.
+ * Eight slots cover MAX_GEARS exactly.
+ */
+const GEAR_PALETTE = {
+  light: ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"],
+  dark: ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e66767", "#d55181", "#d95926"],
+};
+
 const darkMode = matchMedia("(prefers-color-scheme: dark)");
 
 /** Color for a normalized speed t in [0, 1] under the current color scheme. */
@@ -1158,6 +1172,12 @@ function speedColor(t) {
   const ramp = darkMode.matches ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
   const i = Math.min(ramp.length - 1, Math.max(0, Math.round(t * (ramp.length - 1))));
   return ramp[i];
+}
+
+/** Color for a 1-based gear under the current color scheme. */
+function gearColor(gear) {
+  const slots = GEAR_PALETTE[darkMode.matches ? "dark" : "light"];
+  return slots[Math.min(Math.max(gear, 1), slots.length) - 1];
 }
 
 /** m/s -> the display unit selected for the rest of the app. */
@@ -1171,8 +1191,10 @@ function formatLapTime(s) {
   return `${m}:${(s - m * 60).toFixed(2).padStart(5, "0")}`;
 }
 
-/** Upload result plus which lap is on screen. Replaced whole on re-upload. */
-let lapState = { data: null, lapIndex: 0 };
+/** Upload result plus which lap is on screen and what shades the trace
+ * ("speed" | "gear"). Replaced whole on re-upload, except the color mode,
+ * which is a viewing preference rather than a property of the file. */
+let lapState = { data: null, lapIndex: 0, colorMode: "speed" };
 
 function initLapMap() {
   $("#lap-file").addEventListener("change", onLapFile);
@@ -1180,8 +1202,14 @@ function initLapMap() {
     lapState.lapIndex = parseInt(e.target.value, 10);
     renderLapSection();
   });
-  // The ramp direction is baked into stroke attributes, not CSS variables, so
-  // a scheme flip has to redraw rather than restyle.
+  document.querySelectorAll('input[name="lap-color"]').forEach((el) =>
+    el.addEventListener("change", () => {
+      lapState.colorMode = el.value;
+      renderLapSection();
+    })
+  );
+  // The colors are baked into stroke attributes, not CSS variables, so a
+  // scheme flip has to redraw rather than restyle.
   darkMode.addEventListener("change", () => {
     if (lapState.data) renderLapSection();
   });
@@ -1191,11 +1219,12 @@ async function onLapFile(e) {
   const file = e.target.files[0];
   if (!file) return;
   const errEl = $("#lap-error");
+  const { colorMode } = lapState;
   try {
     const text = await file.text();
-    lapState = { data: callPyArgs(pyParseRacechrono, text), lapIndex: 0 };
+    lapState = { data: callPyArgs(pyParseRacechrono, text), lapIndex: 0, colorMode };
   } catch (err) {
-    lapState = { data: null, lapIndex: 0 };
+    lapState = { data: null, lapIndex: 0, colorMode };
     // Pyodide wraps the ValueError in a traceback; the message is on its
     // last non-empty line, reading e.g. "ValueError: Missing column(s): ...".
     const lines = String(err.message ?? err).trim().split("\n");
@@ -1203,11 +1232,13 @@ async function onLapFile(e) {
     errEl.hidden = false;
     $("#lap-view").hidden = true;
     $("#lap-select-label").hidden = true;
+    $("#lap-color-by").hidden = true;
     return;
   }
   errEl.hidden = true;
   lapState.lapIndex = defaultLapIndex(lapState.data.laps);
   buildLapSelect(lapState.data.laps);
+  $("#lap-color-by").hidden = false;
   renderLapSection();
 }
 
@@ -1239,12 +1270,93 @@ function buildLapSelect(laps) {
 function renderLapSection() {
   const lap = lapState.data?.laps[lapState.lapIndex];
   if (!lap) return;
+  // Build the specs before touching the DOM: gear mode reads the live setup
+  // forms, and a mid-edit form (or a Python error) must keep the last good
+  // render on screen rather than blanking the maps.
+  const specs = lapState.colorMode === "gear" ? lapGearSpecs(lap) : [lapSpeedSpec(lap)];
+  if (!specs) return;
+
   $("#lap-view").hidden = false;
-  renderLapMap($("#lap-map"), lap);
-  renderLapLegend($("#lap-legend"), lap);
+  const maps = $("#lap-maps");
+  maps.replaceChildren();
+  for (const spec of specs) {
+    const figure = document.createElement("figure");
+    figure.className = "lap-figure";
+    const svg = svgEl("svg", {
+      class: "chart lap-map",
+      viewBox: `0 0 ${LAP_W} ${LAP_H}`,
+      role: "img",
+      "aria-label": spec.ariaLabel,
+    });
+    figure.append(svg);
+    if (spec.caption) {
+      const cap = document.createElement("figcaption");
+      cap.className = `lap-cap lap-cap-${spec.key}`;
+      cap.textContent = spec.caption;
+      figure.append(cap);
+    }
+    maps.append(figure);
+    renderLapTrace(svg, lap, spec);
+  }
+  renderLapLegend($("#lap-legend"), lap, specs);
 }
 
-function renderLapMap(svg, lap) {
+/** The one-map spec of the original feature: shade by GPS speed. */
+function lapSpeedSpec(lap) {
+  const range = lap.speed_max - lap.speed_min;
+  return {
+    key: "speed",
+    caption: null,
+    ariaLabel: "Track map traced from GPS, colored by speed",
+    segColor: (i) => {
+      const v = (lap.speed[i - 1] + lap.speed[i]) / 2;
+      return speedColor(range > 0 ? (v - lap.speed_min) / range : 0.5);
+    },
+    readout: (i) =>
+      `${speedInUnits(lap.speed[i]).toFixed(0)} ${lapSpeedUnit()} · ` +
+      formatLapTime(lap.t[i]),
+  };
+}
+
+/**
+ * One spec per active setup, shaded by the gear that setup's shift schedule
+ * holds at each sample's speed — with comparison on, the same lap twice, so
+ * the two gearsets can be read corner by corner. Returns null (keep the last
+ * render) when a setup is mid-edit and has no valid gears yet.
+ */
+function lapGearSpecs(lap) {
+  const speeds = lap.speed.map(speedInUnits);
+  const compare = comparing();
+  const specs = [];
+  for (const key of activeKeys()) {
+    const inputs = readInputs(setupRoot(key));
+    if (inputs.gears.length === 0) return null;
+    let gears;
+    try {
+      // The JS array crosses as an iterable proxy, which the list
+      // comprehension in gears_at_speeds consumes directly.
+      gears = callPy(pyGearsAtSpeeds, inputs, speeds);
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+    const label = compare ? `Setup ${key.toUpperCase()}` : null;
+    specs.push({
+      key,
+      caption: label,
+      ariaLabel: `Track map colored by gear${label ? `, ${label}` : ""}`,
+      gears,
+      segColor: (i) => gearColor(gears[i]),
+      readout: (i) =>
+        `${ordinal(gears[i])} gear · ` +
+        `${speedInUnits(lap.speed[i]).toFixed(0)} ${lapSpeedUnit()} · ` +
+        formatLapTime(lap.t[i]),
+    });
+  }
+  return specs;
+}
+
+function renderLapTrace(svg, lap, spec) {
   svg.replaceChildren();
 
   // Fit the lap's meters into the viewBox, uniform scale, centered. SVG y
@@ -1260,15 +1372,12 @@ function renderLapMap(svg, lap) {
 
   // SVG has no per-vertex gradient on a polyline, so the shading is one short
   // <line> per sample pair; round caps make the joins seamless.
-  const range = lap.speed_max - lap.speed_min;
   const g = svgEl("g", { class: "lap-trace" });
   for (let i = 1; i < lap.x.length; i++) {
-    const v = (lap.speed[i - 1] + lap.speed[i]) / 2;
-    const t = range > 0 ? (v - lap.speed_min) / range : 0.5;
     g.append(svgEl("line", {
       x1: px(lap.x[i - 1]), y1: py(lap.y[i - 1]),
       x2: px(lap.x[i]), y2: py(lap.y[i]),
-      stroke: speedColor(t),
+      stroke: spec.segColor(i),
       "stroke-width": 5,
       "stroke-linecap": "round",
     }));
@@ -1299,9 +1408,7 @@ function renderLapMap(svg, lap) {
     marker.setAttribute("cx", px(lap.x[best]));
     marker.setAttribute("cy", py(lap.y[best]));
     marker.style.display = "";
-    readout.textContent =
-      `${speedInUnits(lap.speed[best]).toFixed(0)} ${lapSpeedUnit()} · ` +
-      `${formatLapTime(lap.t[best])}`;
+    readout.textContent = spec.readout(best);
   };
   svg.onpointerleave = () => {
     marker.style.display = "none";
@@ -1309,7 +1416,7 @@ function renderLapMap(svg, lap) {
   };
 }
 
-function renderLapLegend(el, lap) {
+function renderLapLegend(el, lap, specs) {
   el.replaceChildren();
 
   const title = document.createElement("span");
@@ -1317,6 +1424,26 @@ function renderLapLegend(el, lap) {
   title.textContent = `${where ? where + " — " : ""}Lap ${lap.lap}, ` +
                       `${formatLapTime(lap.duration)}` +
                       (lap.complete ? "" : " (partial)");
+  el.append(title);
+
+  if (lapState.colorMode === "gear") {
+    // One chip per gear this lap actually reaches, across every rendered
+    // setup — the same color means the same gear on both maps, so the legend
+    // is shared rather than repeated under each.
+    const used = [...new Set(specs.flatMap((s) => s.gears))].sort((a, b) => a - b);
+    const row = document.createElement("div");
+    row.className = "lap-gear-chips";
+    for (const gear of used) {
+      const chip = document.createElement("span");
+      const sw = document.createElement("i");
+      sw.className = "swatch";
+      sw.style.background = gearColor(gear);
+      chip.append(sw, document.createTextNode(ordinal(gear)));
+      row.append(chip);
+    }
+    el.append(row);
+    return;
+  }
 
   const scale = document.createElement("div");
   scale.className = "lap-scale-row";
@@ -1329,8 +1456,7 @@ function renderLapLegend(el, lap) {
   const ramp = darkMode.matches ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
   bar.style.background = `linear-gradient(to right, ${ramp.join(", ")})`;
   scale.append(lo, bar, hi);
-
-  el.append(title, scale);
+  el.append(scale);
 }
 
 /* ------------------------------ python bridge ---------------------------- */
@@ -1393,6 +1519,10 @@ function recompute() {
   });
 
   redraw();
+
+  // Gear-shaded lap maps read the setups' shift schedules, so they follow
+  // gearing edits (and comparison toggles) the same way the charts do.
+  if (lapState.data && lapState.colorMode === "gear") renderLapSection();
 }
 
 /** The per-setup bundle every renderer takes: inputs, Python result, current state. */
@@ -1699,6 +1829,7 @@ async function main() {
   pyConvertWeight = pyodide.globals.get("convert_weight");
   pyodide.runPython(lapmapSrc);
   pyParseRacechrono = pyodide.globals.get("parse_racechrono");
+  pyGearsAtSpeeds = pyodide.globals.get("gears_at_speeds");
 
   // A fresh setup is the first preset of each, so `presets.json` holds the
   // defaults rather than a second copy of them living here.

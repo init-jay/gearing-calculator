@@ -1118,3 +1118,22 @@ def at_speed(data: dict, speed: float) -> dict:
         "gear": gear, "ratio": ratio, "rpm": rpm,
         "torque": torque, "power": power, "force": force,
     }
+
+
+def gears_at_speeds(data: dict, speeds) -> list:
+    """The gear held at each of ``speeds``: dict in, list of 1-based gears out.
+
+    :func:`at_speed` for a whole lap of samples: the shift schedule is resolved
+    once, then each speed is placed against it — same semantics as
+    :func:`gear_at_speed`, including "at a shift speed the shift has already
+    happened". Speeds are in the setup's unit system, like everything else.
+
+    This models a driver who is always in the gear the schedule prescribes for
+    the current speed, both accelerating and on the way back down — i.e. the
+    downshift happens where the upshift would, which is where the lower gear
+    starts pulling harder again.
+    """
+    inputs = Inputs.from_dict(data)
+    shift_speeds = [s.speed for s in shift_points(inputs)]
+    n_gears = len(inputs.gears)
+    return [_gear_from_shifts(shift_speeds, float(v), n_gears) for v in speeds]

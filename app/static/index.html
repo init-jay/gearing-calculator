@@ -192,7 +192,8 @@
       <h2 id="lapmap-heading">Lap map</h2>
       <p class="hint">
         Upload a RaceChrono Pro CSV export (Format 3) to trace a lap from its
-        GPS log, colored by speed. Nothing leaves your browser.
+        GPS log, colored by speed — or by the gear each setup above would hold
+        there, one map per setup while comparing. Nothing leaves your browser.
       </p>
       <div class="lap-controls">
         <input type="file" id="lap-file" accept=".csv,text/csv"
@@ -200,11 +201,26 @@
         <label id="lap-select-label" hidden>Lap
           <select id="lap-select"></select>
         </label>
+        <!-- Gear mode reads the lap's speeds through each setup's shift
+             schedule, so with comparison on it draws one map per setup:
+             the same track, colored by the gear each gearset would hold. -->
+        <fieldset id="lap-color-by" class="lap-color-by" hidden>
+          <legend>Color by</legend>
+          <label>
+            <input type="radio" name="lap-color" value="speed" checked />
+            <span>Speed</span>
+          </label>
+          <label>
+            <input type="radio" name="lap-color" value="gear" />
+            <span>Gear</span>
+          </label>
+        </fieldset>
       </div>
       <p id="lap-error" class="lap-error" role="alert" hidden></p>
       <div id="lap-view" hidden>
-        <svg id="lap-map" class="chart lap-map" viewBox="0 0 640 480" role="img"
-             aria-label="Track map traced from GPS, colored by speed"></svg>
+        <!-- Filled by renderLapSection: one figure per rendered map — a single
+             speed-shaded trace, or one gear-shaded trace per active setup. -->
+        <div id="lap-maps" class="lap-maps"></div>
         <div id="lap-legend" class="legend lap-legend"></div>
       </div>
     </section>

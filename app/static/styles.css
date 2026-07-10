@@ -847,3 +847,43 @@ tbody td.is-current { background: var(--accent-soft); }
   border-radius: 5px;
   border: 1px solid var(--border);
 }
+
+.lap-color-by {
+  display: flex;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.lap-color-by legend { font-size: 0.8rem; color: var(--muted); padding: 0 0.3rem; }
+.lap-color-by label { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+/* One map, or one per setup while comparing — side by side where they fit,
+   stacked on narrow screens, always to a shared scale for corner-by-corner
+   reading. */
+.lap-maps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.lap-figure { flex: 1 1 24rem; max-width: 48rem; margin: 0; min-width: 0; }
+
+/* Setup identity keeps its colors from the rest of the app (amber A, blue B);
+   the map's own colors are busy carrying the gears. */
+.lap-cap { font-size: 0.85rem; color: var(--muted); margin-top: 0.35rem; }
+.lap-cap-a::before,
+.lap-cap-b::before {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  background: var(--dial-amber);
+}
+.lap-cap-b::before { background: var(--dial-blue); }
+
+.lap-gear-chips { display: flex; flex-wrap: wrap; gap: 0.75rem; }

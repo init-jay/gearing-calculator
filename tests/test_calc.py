@@ -1074,3 +1074,29 @@ def test_compute_exposes_the_traction_limit():
     assert isclose(result["traction_limit"], 1400.0 * calc.STANDARD_GRAVITY, rel_tol=1e-12)
     # Same units as the curves it is drawn across.
     assert result["force_unit"] == "N"
+
+
+def test_gears_at_speeds_matches_at_speed_sample_by_sample():
+    # The batch entrypoint is at_speed's gear resolution over a list; the two
+    # must never disagree, or the lap gear map would contradict the gauges.
+    data = {"gears": STOCK}
+    speeds = [0.0, 15.0, 42.5, 60.0, 88.8, 130.0, 220.0, 500.0]
+    batch = calc.gears_at_speeds(data, speeds)
+    assert batch == [calc.at_speed(data, v)["gear"] for v in speeds]
+
+
+def test_gears_at_speeds_boundary_and_clamp():
+    data = {"gears": STOCK}
+    shifts = calc.shift_points(calc.Inputs.from_dict(data))
+    # At exactly a shift speed the shift has just happened -> the next gear.
+    assert calc.gears_at_speeds(data, [shifts[0].speed]) == [shifts[0].to_gear]
+    # Beyond the last shift the answer clamps to the top gear.
+    assert calc.gears_at_speeds(data, [shifts[-1].speed * 10]) == [len(STOCK)]
+
+
+def test_gears_at_speeds_is_monotonic_in_speed():
+    data = {"gears": STOCK}
+    speeds = [v * 2.5 for v in range(120)]
+    gears = calc.gears_at_speeds(data, speeds)
+    assert gears == sorted(gears)
+    assert set(gears) == set(range(1, len(STOCK) + 1))

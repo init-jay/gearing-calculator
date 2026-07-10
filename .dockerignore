@@ -1,0 +1,20 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+.env
+
+.devcontainer/
+.claude/
+tests/
+README.md
+
+# Not ignored: app/static/pyodide/. It is gitignored, but when a working copy
+# has it the Dockerfile reuses it instead of re-downloading the runtime.

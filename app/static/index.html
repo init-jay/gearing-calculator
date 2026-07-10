@@ -222,6 +222,34 @@
              speed-shaded trace, or one gear-shaded trace per active setup. -->
         <div id="lap-maps" class="lap-maps"></div>
         <div id="lap-legend" class="legend lap-legend"></div>
+
+        <!-- Gear mode only: what the simulated driver is doing. Static copy,
+             but it names live inputs (shift RPM, dead time), so keep it in
+             sync with gears_at_speeds in calc.py. -->
+        <details id="lap-strategy" class="viz lap-strategy" hidden>
+          <summary>Shift strategy</summary>
+          <p class="hint">
+            The map runs your lap's speed trace through each setup's gearing.
+          </p>
+          <ul class="hint lap-strategy-list">
+            <li><strong>Upshifts</strong> happen at the input
+              <em>Shift at RPM</em>, like the shift trace above.</li>
+            <li><strong>Downshifts</strong> wait until the lower gear pulls harder; using the same tractive-effort crossovers as
+              the Optimal shift points table. A taller
+              gear that is still the stronger one is simply held.</li>
+            <li><strong>Corners:</strong> above
+              <label class="lap-corner-g-label">
+                <input type="number" id="lap-corner-g" value="0.4"
+                       min="0" max="3" step="0.1"
+                       aria-label="Cornering threshold in G" />&nbsp;G
+              </label>
+              of lateral load the downshift waits for the car to unwind. Upshifts still fire.</li>
+            <li><strong>Shift dead time is anticipated:</strong> if a downshift
+              cannot repay the down-and-back-up cost (2× <em>Shift dead
+              time</em>) before the revs recover, then hold taller gear.</li>
+            <li>Never uses 1st gear.</li>
+          </ul>
+        </details>
       </div>
     </section>
   </main>

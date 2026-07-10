@@ -71,6 +71,12 @@ BENCHMARK_MPH = 60.0
 # counts in `shift_crossovers`, so a run is deterministic and unit-independent.
 ACCEL_STEPS = 2000
 
+# Lateral acceleration (G) above which `gears_at_speeds` treats the car as
+# loaded up mid-corner and defers downshifts. Road tires hit their cornering
+# limit around 0.9-1.1 G; 0.4 G is comfortably past "changing lanes" while
+# catching every real corner well before the apex.
+CORNER_LATERAL_G = 0.4
+
 Units = str  # "imperial" | "metric"
 
 # (rpm, torque) points. Torque is N.m under metric, lb-ft under imperial.
@@ -1120,7 +1126,9 @@ def at_speed(data: dict, speed: float) -> dict:
     }
 
 
-def gears_at_speeds(data: dict, speeds) -> list:
+def gears_at_speeds(
+    data: dict, speeds, times=None, lateral_g=None, corner_g=CORNER_LATERAL_G
+) -> list:
     """The gear held at each of ``speeds``: dict in, list of 1-based gears out.
 
     ``speeds`` is a lap in *sample order* — the result is stateful, not a pure
@@ -1140,31 +1148,73 @@ def gears_at_speeds(data: dict, speeds) -> list:
     is a launch gear, not a corner gear. 1st only appears where the schedule
     itself starts a sample there.
 
+    Two more pieces of laziness, each fed by an optional telemetry channel:
+
+    - ``times`` (s, per sample): every downshift costs a shift and usually a
+      shift back up, ``2 * shift_time`` of dead time in total. A downshift is
+      only taken when the car will stay below the pair's upshift speed for at
+      least that long; a briefer dip — a kink, a lift — is ridden out in the
+      taller gear.
+    - ``lateral_g`` (G, per sample): above ``corner_g`` (default
+      ``CORNER_LATERAL_G``) the car is loaded up mid-corner, where nobody
+      rows the box. Downshifts wait until the car unwinds; upshifts still
+      follow the schedule, since the alternative is holding a gear past the
+      revs the schedule allows.
+
     Without a usable torque curve there are no effort curves to cross, so the
-    schedule applies in both directions — still never downshifting into 1st.
-    Speeds are in the setup's unit system, like everything else.
+    schedule times the downshifts instead — the dead-time and cornering
+    holds still apply. Speeds are in the setup's unit system, like everything
+    else.
     """
     inputs = Inputs.from_dict(data)
+    speeds = [float(v) for v in speeds]
+    if times is not None:
+        times = [float(t) for t in times]
+        if len(times) != len(speeds):
+            times = None
+    if lateral_g is not None:
+        lateral_g = [abs(float(g)) for g in lateral_g]
+        if len(lateral_g) != len(speeds):
+            lateral_g = None
+    corner_g = float(corner_g)
+
     shift_speeds = [s.speed for s in shift_points(inputs)]
     n_gears = len(inputs.gears)
 
     # crossover_speeds[g - 2] is where gear g - 1 starts out-pulling gear g;
     # decelerating past it in gear g is the moment the downshift pays.
     crossover_speeds = [c.speed for c in shift_crossovers(inputs)]
+    round_trip = 2.0 * inputs.shift_time
+
+    def dwell_pays(i: int, pair: int) -> bool:
+        """Will a downshift through ``pair`` at sample ``i`` earn its dead time?
+
+        The counterfactual upshift back comes at the pair's schedule speed, so
+        the time spent below it is what the round trip buys.
+        """
+        if times is None:
+            return True
+        up_speed = shift_speeds[pair]
+        for j in range(i + 1, len(speeds)):
+            if speeds[j] >= up_speed:
+                return times[j] - times[i] >= round_trip
+        return True  # never back up within the lap: the shift pays for itself
 
     gears = []
     gear = 0  # below any real gear, so the first sample always follows the schedule
-    for v in speeds:
-        v = float(v)
+    for i, v in enumerate(speeds):
         scheduled = _gear_from_shifts(shift_speeds, v, n_gears)
         if scheduled >= gear:
             gear = scheduled
+        elif lateral_g is not None and lateral_g[i] >= corner_g:
+            pass  # loaded up mid-corner: the downshift waits for the exit
         else:
             floor = max(scheduled, min(2, n_gears))
-            if not crossover_speeds:
-                gear = floor
-            else:
-                while gear > floor and v < crossover_speeds[gear - 2]:
-                    gear -= 1
+            while (
+                gear > floor
+                and (not crossover_speeds or v < crossover_speeds[gear - 2])
+                and dwell_pays(i, gear - 2)
+            ):
+                gear -= 1
         gears.append(gear)
     return gears

@@ -49,6 +49,7 @@ def parse_racechrono(text: str, max_points_per_lap: int = 1200) -> dict:
             {"lap": int, "complete": bool, "duration": float,
              "x": [m...], "y": [m...],       # local meters, shared origin
              "speed": [m/s...], "t": [s...],  # t is offset from lap start
+             "lat_g": [G...],                 # lateral acc; 0.0 if not logged
              "speed_min": float, "speed_max": float},
             ...  # sorted by lap number
           ],
@@ -89,6 +90,9 @@ def parse_racechrono(text: str, max_points_per_lap: int = 1200) -> dict:
         raise ValueError("Missing column(s): " + ", ".join(missing))
     col = {name: header.index(name) for name in REQUIRED_COLUMNS}
     width = max(col.values()) + 1
+    # Lateral G is auxiliary (the gear simulation uses it to spot corners), so
+    # a file without the column still parses — it just reads as zero.
+    lat_g_col = header.index("lateral_acc") if "lateral_acc" in header else None
 
     # lap number -> [(lat, lon, speed, elapsed_time), ...] in file order. The
     # units and source rows that follow the header have a non-numeric (or
@@ -108,10 +112,16 @@ def parse_racechrono(text: str, max_points_per_lap: int = 1200) -> dict:
             t = float(row[col["elapsed_time"]])
         except ValueError:
             continue  # units/source row, blank lap number, or GPS dropout
+        lat_g = 0.0
+        if lat_g_col is not None:
+            try:
+                lat_g = float(row[lat_g_col])
+            except (ValueError, IndexError):
+                pass  # a dropped calc cell should not cost the GPS sample
         if lap not in laps:
             laps[lap] = []
             lap_order.append(lap)
-        laps[lap].append((lat, lon, speed, t))
+        laps[lap].append((lat, lon, speed, t, lat_g))
 
     laps = {n: pts for n, pts in laps.items() if len(pts) >= 2}
     if not laps:
@@ -144,6 +154,7 @@ def parse_racechrono(text: str, max_points_per_lap: int = 1200) -> dict:
                 "y": ys,
                 "speed": speeds,
                 "t": [p[3] - t0 for p in pts],
+                "lat_g": [p[4] for p in pts],
                 "speed_min": min(speeds),
                 "speed_max": max(speeds),
             }

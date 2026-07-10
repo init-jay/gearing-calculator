@@ -1208,6 +1208,9 @@ function initLapMap() {
       renderLapSection();
     })
   );
+  // The cornering threshold lives in the strategy blurb, which only shows in
+  // gear mode — the only mode the value affects.
+  $("#lap-corner-g").addEventListener("input", renderLapSection);
   // The colors are baked into stroke attributes, not CSS variables, so a
   // scheme flip has to redraw rather than restyle.
   darkMode.addEventListener("change", () => {
@@ -1299,6 +1302,7 @@ function renderLapSection() {
     renderLapTrace(svg, lap, spec);
   }
   renderLapLegend($("#lap-legend"), lap, specs);
+  $("#lap-strategy").hidden = lapState.colorMode !== "gear";
 }
 
 /** The one-map spec of the original feature: shade by GPS speed. */
@@ -1324,8 +1328,16 @@ function lapSpeedSpec(lap) {
  * the two gearsets can be read corner by corner. Returns null (keep the last
  * render) when a setup is mid-edit and has no valid gears yet.
  */
+/** Cornering threshold (G) from the blurb's input; mid-edit blanks fall back
+ * to the model's default rather than disabling the corner hold. */
+function lapCornerG() {
+  const v = parseFloat($("#lap-corner-g").value);
+  return Number.isFinite(v) && v >= 0 ? v : 0.4;
+}
+
 function lapGearSpecs(lap) {
   const speeds = lap.speed.map(speedInUnits);
+  const cornerG = lapCornerG();
   const compare = comparing();
   const specs = [];
   for (const key of activeKeys()) {
@@ -1333,9 +1345,12 @@ function lapGearSpecs(lap) {
     if (inputs.gears.length === 0) return null;
     let gears;
     try {
-      // The JS array crosses as an iterable proxy, which the list
-      // comprehension in gears_at_speeds consumes directly.
-      gears = callPy(pyGearsAtSpeeds, inputs, speeds);
+      // The JS arrays cross as iterable proxies, which gears_at_speeds
+      // materializes. Times and lateral G let it charge shift dead time and
+      // hold gears through loaded corners.
+      gears = callPy(
+        pyGearsAtSpeeds, inputs, speeds, lap.t, lap.lat_g ?? null, cornerG
+      );
     } catch (err) {
       console.error(err);
       return null;

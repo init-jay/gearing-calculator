@@ -43,7 +43,9 @@ Gotchas learned the hard way:
 - Gearing math: edit inputs in the Inputs panel, watch gauges/charts redraw.
 - Lap map: upload a RaceChrono Format-3 CSV (generate a synthetic one — kidney
   loop of `lat0 + r·sin(a)`, `lon0 + r·cos(a)/cos(lat0)` rows at 20 Hz with the
-  real 19-column header including duplicate `speed` columns), then check
+  real 19-column header including duplicate `speed` columns; derive
+  `lateral_acc` from path curvature — v²·κ/9.81 — or the corner-freeze gear
+  logic never triggers), then check
   `#lap-view` unhides, `.lap-trace line` count, `#lap-select` options,
   `#lap-legend` text, hover readout, and a garbage upload showing `#lap-error`.
 - Lap gear maps: check `input[name="lap-color"][value="gear"]`, then `#compare`

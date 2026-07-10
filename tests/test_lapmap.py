@@ -129,3 +129,16 @@ def test_handles_bom_and_crlf():
     text = "\ufeff" + TEXT.replace("\n", "\r\n")
     parsed = lapmap.parse_racechrono(text)
     assert [lap["lap"] for lap in parsed["laps"]] == [1, 2, 3]
+
+
+def test_lateral_g_extracted_per_sample(parsed):
+    # Lap 2's five kept samples carry the lateral_acc column verbatim; the
+    # GPS-dropout row is gone, so its -0.1 does not appear between them.
+    assert parsed["laps"][1]["lat_g"] == [-0.1, 0.85, -0.1, -1.1, -0.1]
+    for lap in parsed["laps"]:
+        assert len(lap["lat_g"]) == len(lap["speed"])
+
+
+def test_missing_lateral_column_reads_as_zero():
+    parsed = lapmap.parse_racechrono(TEXT.replace("lateral_acc", "other_col"))
+    assert all(g == 0.0 for lap in parsed["laps"] for g in lap["lat_g"])

@@ -1168,3 +1168,52 @@ def test_gears_at_speeds_is_monotonic_in_speed():
     gears = calc.gears_at_speeds(data, speeds)
     assert gears == sorted(gears)
     assert set(gears) == set(range(1, len(STOCK) + 1))
+
+
+def test_gears_at_speeds_defers_the_downshift_mid_corner():
+    data, v_into_4th, v_cross, _ = _hold_scenario()
+    below = v_cross * 0.99
+    # Straight-line, the dip below the crossover takes the downshift...
+    assert calc.gears_at_speeds(data, [v_into_4th, below]) == [4, 3]
+    # ...but loaded up past CORNER_LATERAL_G it waits (sign is irrelevant),
+    # and fires as soon as the car unwinds.
+    held = calc.gears_at_speeds(
+        data, [v_into_4th, below, below], lateral_g=[0.0, -0.9, 0.1]
+    )
+    assert held == [4, 4, 3]
+
+
+def test_gears_at_speeds_still_upshifts_mid_corner():
+    # The freeze is downshifts-only: holding a gear cannot be allowed to run
+    # the engine past the revs the schedule permits.
+    data, v_into_4th, _, _ = _hold_scenario()
+    got = calc.gears_at_speeds(
+        data, [v_into_4th * 0.9, v_into_4th], lateral_g=[1.0, 1.0]
+    )
+    assert got == [3, 4]
+
+
+def test_gears_at_speeds_skips_downshifts_that_cannot_repay_their_dead_time():
+    data, v_into_4th, v_cross, _ = _hold_scenario()
+    below = v_cross * 0.99
+    speeds = [v_into_4th, below, v_into_4th]
+    # Default shift_time is 0.3 s, so the down-and-back-up round trip costs
+    # 0.6 s. A 0.1 s dip is ridden out; a 2 s one pays.
+    assert calc.gears_at_speeds(data, speeds, times=[0.0, 0.1, 0.2]) == [4, 4, 4]
+    assert calc.gears_at_speeds(data, speeds, times=[0.0, 0.1, 2.1]) == [4, 3, 4]
+    # A dip the lap never comes back out of always pays.
+    assert calc.gears_at_speeds(data, speeds[:2], times=[0.0, 0.1]) == [4, 3]
+    # Zero dead time (e.g. a DCT) never skips.
+    data["shift_time"] = 0.0
+    assert calc.gears_at_speeds(data, speeds, times=[0.0, 0.1, 0.2]) == [4, 3, 4]
+
+
+def test_gears_at_speeds_corner_threshold_is_adjustable():
+    data, v_into_4th, v_cross, _ = _hold_scenario()
+    below = v_cross * 0.99
+    speeds, lat = [v_into_4th, below], [0.0, 0.9]
+    # 0.9 G freezes the default driver but not one who calls corners at 1.0 G;
+    # a 0.2 G threshold freezes on loads the default would shift through.
+    assert calc.gears_at_speeds(data, speeds, lateral_g=lat) == [4, 4]
+    assert calc.gears_at_speeds(data, speeds, lateral_g=lat, corner_g=1.0) == [4, 3]
+    assert calc.gears_at_speeds(data, speeds, lateral_g=[0.0, 0.3], corner_g=0.2) == [4, 4]

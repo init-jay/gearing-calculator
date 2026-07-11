@@ -1915,7 +1915,12 @@ async function main() {
     presetSelect(root, "tire").value = "0";
   }
   wireEvents();
-  recompute();
+  // Browsers restore a checked #compare across a reload, but the `change`
+  // event that builds the comparison UI does not fire on restore. Run the
+  // handler once so the tabs, dual gauges and B setup match the checkbox
+  // whatever state it loaded in; it calls `recompute` itself. (Unchecked —
+  // the usual case — this is a harmless single-setup sync.)
+  onCompareChange();
 
   $("#loading").hidden = true;
   $("#app").hidden = false;

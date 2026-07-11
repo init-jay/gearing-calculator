@@ -466,8 +466,8 @@ const CHART = {
 const SPREAD_RGB = { a: "245, 161, 29", b: "59, 154, 225" };
 const SPREAD_MIN_ALPHA = 0.45;
 
-// Below this share a band is too narrow for its percentage; the gear number and
-// the `title` still fit.
+// Below this share a band is too narrow for its percentage label; the `title`
+// still carries the full detail on hover.
 const SPREAD_LABEL_SHARE = 0.08;
 
 /**
@@ -524,7 +524,7 @@ function renderSpread(el, series) {
       seg.title =
         `Gear ${span.gear}: ${span.from_speed.toFixed(1)}–${span.to_speed.toFixed(1)} ${unit}` +
         ` (${pct}% of the range)`;
-      seg.textContent = span.share >= SPREAD_LABEL_SHARE ? `${span.gear} · ${pct}%` : String(span.gear);
+      seg.textContent = span.share >= SPREAD_LABEL_SHARE ? `${pct}%` : "";
       bar.append(seg);
     });
 

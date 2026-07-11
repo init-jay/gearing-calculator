@@ -304,7 +304,7 @@ main {
 
 .hamburger:hover { border-color: var(--accent); }
 .hamburger svg { display: block; }
-.hamburger svg polygon { fill: currentColor; }
+.hamburger svg path { fill: currentColor; }
 /* Phone-first: an icon-only button, so it stays narrow and the theme switch
    keeps its place on the row. The label returns on desktop (below). */
 .hamburger span { display: none; }

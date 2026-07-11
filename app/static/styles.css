@@ -10,9 +10,10 @@
   --needle: #d64545;
   --radius: 12px;
 
-  /* The dials are a physical instrument, not a chart: they keep this palette in
-     both color schemes, so they are deliberately absent from the dark-mode
-     block below. Don't "fix" that omission — it is what makes them fixed. */
+  /* The dials are a physical instrument, not a chart. This is their daytime
+     palette; dark mode swaps the whole set for the BMW E46 night-backlight look
+     (the second dark-mode block below) — the one place the dial colours follow
+     the scheme, on purpose. Keep both sets deliberate. */
   --dial-face: #1a1d21;
   --dial-face-edge: #050607;
   --dial-bezel: #3d434a;
@@ -583,10 +584,10 @@ fieldset.units label {
   /* Same instrument rim as the dials: gray bezel border over the dark
      face-edge fill — the box's two tones as the gauges' bezel + face-edge. */
   background: var(--dial-face-edge);
-  border: 1px solid var(--dial-bezel);
+  border: 2px solid var(--dial-bezel);
   border-radius: 0.8cqw;
   /* Smaller than before so it does not overpower the dials. */
-  font-size: 3cqw;
+  font-size: 2.5cqw;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;

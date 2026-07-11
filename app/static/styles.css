@@ -104,17 +104,23 @@
    would otherwise override the UA stylesheet's [hidden]{display:none}. */
 [hidden] { display: none !important; }
 
+/* Kill the sideways rubber-band drag on touch, so a horizontal gesture scrubs
+   the slider instead of sliding the whole page. On phones the viewport scrolls
+   on the root element, so the rule has to sit on <html> too — on <body> alone
+   the page still wiggles. `overflow-x: clip` trims the full-bleed topbar's 100vw
+   sliver without creating a scroll container (so the sticky topbar still pins). */
+html {
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
-  /* The full-bleed topbar is sized with 100vw, which includes the scrollbar
-     gutter; clip the sliver rather than growing a horizontal scrollbar. */
   overflow-x: clip;
-  /* Kill the sideways rubber-band drag on touch, so a horizontal gesture scrubs
-     the slider or swipes the drawer instead of sliding the whole page. */
   overscroll-behavior-x: none;
 }
 

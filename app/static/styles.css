@@ -1,3 +1,14 @@
+/* Self-hosted so the dials keep their look offline (the app ships as a Docker
+   image with no network). One variable woff2, latin subset — enough for the
+   numerals and the "km/h" / "1/min" legends — covers weights 400-700. */
+@font-face {
+  font-family: "Oswald";
+  font-style: light;
+  font-weight: 200 300;
+  font-display: swap;
+  src: url(fonts/oswald-latin.woff2) format("woff2");
+}
+
 :root {
   --bg: #f6f7f9;
   --panel: #ffffff;
@@ -627,6 +638,7 @@ fieldset.units label {
   border: 2px solid var(--dial-bezel);
   border-radius: 0.8cqw;
   /* Smaller than before so it does not overpower the dials. */
+  font-family: "Oswald", system-ui, sans-serif;
   font-size: 2.5cqw;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -653,6 +665,7 @@ fieldset.units label {
    a tach counting 0-7 can be big, a speedo counting to 300 cannot. */
 .gauge-tick-label {
   fill: var(--dial-ink);
+  font-family: "Oswald", system-ui, sans-serif;
   font-weight: 600;
   text-anchor: middle;
   dominant-baseline: central;
@@ -675,7 +688,7 @@ fieldset.units label {
 .gauge-needle-b { fill: var(--dial-blue); }
 
 .gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
-.gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
+.gauge-legend { fill: var(--dial-ink); font-family: "Oswald", system-ui, sans-serif; font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
 
 /* ----------------------------- gear spread ------------------------------ */
 .spread { margin-bottom: 0.9rem; }

@@ -1214,6 +1214,38 @@ function initInputsDrawer() {
   ));
   desktopLayout.addEventListener("change", syncAria);
   syncAria();
+  initDrawerSwipe();
+}
+
+/** Phone-only edge-to-edge swipe: drag right to reveal the inputs drawer, left
+ *  to dismiss it. Listeners are passive and only act on a clearly horizontal
+ *  flick, so vertical scrolling and the slider's own scrub are left alone. */
+function initDrawerSwipe() {
+  const SWIPE_MIN = 55; // px of horizontal travel before it counts
+  let x0 = null, y0 = null, tracking = false;
+
+  document.addEventListener("touchstart", (e) => {
+    tracking = false;
+    if (desktopLayout.matches || e.touches.length !== 1) return;
+    // Leave the slider's scrub and any sideways-scrolling region to themselves.
+    const el = e.target;
+    if (el && el.closest && el.closest("#cur_speed, .table-wrap")) return;
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+    tracking = true;
+  }, { passive: true });
+
+  document.addEventListener("touchend", (e) => {
+    if (!tracking || desktopLayout.matches) return;
+    tracking = false;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    // Horizontal flick only: enough travel, and more sideways than up/down.
+    if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) <= Math.abs(dy)) return;
+    const open = $("#inputs-drawer").classList.contains("open");
+    if (dx > 0 && !open) setInputsDrawer(true);
+    else if (dx < 0 && open) setInputsDrawer(false);
+  }, { passive: true });
 }
 
 /* -------------------------------- lap map -------------------------------- */
@@ -1704,7 +1736,13 @@ function redraw() {
   if (!series) return;
 
   const compare = series.length > 1;
-  $("#cur_speed_out").textContent = String(Math.round(speed));
+
+  // Grow the pill's fill to match the value (min is 0) and keep the in-track
+  // label reading the same value; covers a drag and a programmatic max change
+  // (compute() reshuffles the ceiling, then redraws).
+  const slider = $("#cur_speed");
+  slider.style.setProperty("--fill", `${(speed / (parseFloat(slider.max) || 1)) * 100}%`);
+  $("#speed-hint-val").textContent = String(Math.round(speed));
 
   // One face for both setups: the scale spans the taller redline and the red band
   // is that dial's own last major segment, so the two needles are read against the

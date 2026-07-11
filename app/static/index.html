@@ -60,7 +60,7 @@
          reachable from any chart. The slider keeps its id: the same handlers
          drive the gauges and chart markers wherever it lives. -->
     <div class="topbar">
-      <button type="button" id="inputs-toggle" class="hamburger"
+      <button type="button" id="inputs-toggle" class="hamburger" aria-label="Inputs"
               aria-controls="inputs-drawer" aria-expanded="false">
         <!-- BMW M-style forward-slanted stripes in place of the usual three
              flat dashes; a single ink color, following the button text. -->
@@ -71,12 +71,12 @@
         </svg>
         <span>Inputs</span>
       </button>
-      <div class="field topbar-speed">
-        <label for="cur_speed">
-          Current speed <output id="cur_speed_out">100</output>
-          <span class="unit" data-speed-unit>km/h</span>
-        </label>
-        <input type="range" id="cur_speed" min="0" max="277" step="1" value="100" />
+      <!-- The label sits inside the track and names the value the bar sets;
+           redraw() keeps #speed-hint-val in step as you drag. -->
+      <div class="topbar-speed">
+        <input type="range" id="cur_speed" min="0" max="277" step="1" value="100"
+               aria-label="Target speed" />
+        <span class="speed-hint" aria-hidden="true">Target&nbsp;Speed:&nbsp;<span id="speed-hint-val">100</span>&nbsp;<span class="unit" data-speed-unit>km/h</span></span>
       </div>
 
       <!-- A BMW headlight-switch for the page theme, sized as a big touch target:

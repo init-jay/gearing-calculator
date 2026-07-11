@@ -560,85 +560,44 @@ fieldset.units label {
 
 /* Lifted out of the grid so it costs the dials no width. The dials are circles
    in square boxes, which leaves a wedge of empty space between their lower
-   edges — the readout drops into it, where the cluster puts its warning lights. */
-.rpm-readout {
+   edges — the gear indicator drops into it, where the cluster puts it, and
+   stays there at every size. Comparing just stacks B under A in the same box.
+   Everything below is sized in cqw (the `.gauges` container is inline-size),
+   so the box holds its proportion to the dials as the panel scales and the
+   two never trade places or reflow — the layout is size-invariant. */
+/* One line, fixed 2-digit width (so B appearing does not resize it), sized in
+   cqw against the `.gauges` container so it holds its proportion to the dials. */
+.gear-cluster {
   position: absolute;
   left: 50%;
+  /* The gauges are flat-bottomed and fill the container height, so its bottom
+     edge is that flat line — the box sits on it, like the cluster's odo LCD. */
   bottom: 0;
   transform: translateX(-50%);
-  display: grid;
-  justify-items: center;
-  gap: 0.1rem;
-  padding: 0.4rem 0.75rem;
+  display: inline-flex;
+  justify-content: center;
+  /* Reserves the widest content — "N/N" — so a lone gear in single mode sits in
+     the same box, and it never resizes when B appears. */
+  min-width: 2.8em;
+  padding: 0.45cqw 1cqw;
+  /* Same instrument rim as the dials: gray bezel border over the dark
+     face-edge fill — the box's two tones as the gauges' bezel + face-edge. */
   background: var(--dial-face-edge);
   border: 1px solid var(--dial-bezel);
-  border-radius: 6px;
-}
-
-/* The readout is a fixed size but the dials scale with the panel, so past a point
-   the wedge between them is too small to hold it and it drops below instead.
-   Keyed off the container, not the viewport: the panel is narrower at 1024px
-   (two columns) than at 900px (one), so viewport width says nothing useful here. */
-@container (max-width: 700px) {
-  .rpm-readout {
-    position: static;
-    transform: none;
-    grid-row: 2;
-    grid-column: 1 / -1;
-    justify-self: center;
-    margin-top: 0.75rem;
-  }
-}
-
-/* Comparing adds a second row. The taller box does technically clear the dials at
-   the widest layout, but by ~3px — less than one font metric's worth — so it drops
-   below at every width rather than pretending to fit. */
-.gauges[data-compare] .rpm-readout {
-  position: static;
-  transform: none;
-  grid-row: 2;
-  grid-column: 1 / -1;
-  justify-self: center;
-  margin-top: 0.75rem;
-}
-
-.rpm-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.3rem;
-}
-
-/* The digits are tabular, so reserving five slots keeps the box — and the dials
-   either side of it — a constant width as the rpm climbs from 0 to five figures. */
-.rpm-row output {
-  min-width: 5ch;
-  text-align: center;
-  color: var(--dial-amber);
-  font-size: 1.15rem;
-  font-weight: 650;
+  border-radius: 0.8cqw;
+  /* Smaller than before so it does not overpower the dials. */
+  font-size: 3cqw;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
 
-.rpm-tag {
-  color: var(--dial-amber);
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.rpm-row[data-setup="b"] output,
-.rpm-row[data-setup="b"] .rpm-tag { color: var(--dial-blue); }
-
-/* One slider drives both setups, so it can be pushed past a setup's own top
-   speed — which would need more rpm than that engine has. Say so. */
-.rpm-row[data-over] output { color: var(--dial-red); }
-
-.rpm-unit {
-  color: var(--dial-ink-dim);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
+/* Colour tracks the tach needle: white with a lone (single-setup) needle,
+   amber once comparison splits it into A's needle. */
+.gear-a { color: var(--dial-ink); }
+.gauges[data-compare] .gear-a { color: var(--dial-amber); }
+.gear-b { color: var(--dial-blue); }
+.gear-sep { color: var(--dial-ink-dim); padding: 0 0.12em; }
 
 .gauge { width: 100%; height: auto; }
 
@@ -661,6 +620,9 @@ fieldset.units label {
 .gauge[data-num-width="narrow"] .gauge-tick-label { font-size: 17px; }
 .gauge[data-num-width="medium"] .gauge-tick-label { font-size: 14px; }
 .gauge[data-num-width="wide"] .gauge-tick-label { font-size: 12px; }
+/* Busy dial (20-major speedo): smaller numerals so the crowded top clears.
+   After the width rules — same specificity, so order decides. */
+.gauge[data-dense="yes"] .gauge-tick-label { font-size: 9px; }
 .gauge-needle { fill: var(--dial-ink); }
 
 /* Comparing puts a needle per setup on the one tach face. They take the setup's
@@ -673,29 +635,6 @@ fieldset.units label {
 
 .gauge-hub { fill: var(--dial-hub); stroke: var(--dial-hub-edge); stroke-width: 1.5; }
 .gauge-legend { fill: var(--dial-ink); font-size: 9px; text-anchor: middle; letter-spacing: 0.04em; }
-
-/* Just the gear readout now (the slider moved to the topbar): a small box
-   sitting under the tach, where a cluster puts its gear indicator. */
-.controls {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 0.75rem;
-}
-
-.controls .field { width: 7rem; }
-
-/* The gear is derived from the shift schedule rather than chosen, so it gets
-   the same dashed treatment as the derived tire diameter — but keeps the box
-   the old <select> had, so the control row stays aligned. */
-.gear-readout {
-  display: block;
-  padding: 0.5rem 0.6rem;
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-}
 
 /* ----------------------------- gear spread ------------------------------ */
 .spread { margin-bottom: 0.9rem; }

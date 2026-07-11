@@ -106,6 +106,19 @@ function rpmScale(maxRpm) {
   return { max: Math.ceil(maxRpm / step) * step, step };
 }
 
+// Speedo majors are always a whole multiple of 20 (km/h or mph), like a real
+// cluster. The spacing is the smallest such that the marker count — the majors
+// plus the 0 — stays under SPEEDO_MAX_MARKERS, so a near-1:1 final drive that
+// sends the top speed sky-high widens the scale instead of crowding the dial
+// (20 for normal tops, 40 past ~280, 60/80/… beyond). mph tops out low enough
+// that it never leaves 20.
+const SPEEDO_MAX_MARKERS = 15;
+function speedoScale(maxSpeed) {
+  const maxMajors = SPEEDO_MAX_MARKERS - 1; // one marker is the 0
+  const step = Math.max(20, Math.ceil(maxSpeed / maxMajors / 20) * 20);
+  return { max: Math.ceil(maxSpeed / step) * step, step };
+}
+
 // One minor tick at each half-step, as on the reference cluster. Retune here.
 const MINOR_PER_MAJOR = 2;
 
@@ -115,6 +128,11 @@ const REDLINE_INSET_DEG = 2.5;
 
 const R_BEZEL = 97;
 const R_FACE = 95;
+// Where the dials are cut flat. A bezel half-stroke (1.25) above the viewBox
+// bottom (y=180), so the full 2.5-wide bezel border shows along the flat edge
+// and that edge lands exactly on the element's bottom. Below every tick (y≈162)
+// and label, so the flat only removes the empty dial arc.
+const GAUGE_FLAT_Y = 178.75;
 const R_TICK = 88; // outer edge of the tick ring; ticks grow inward from here
 const R_MAJOR_IN = 76;
 const R_MINOR_IN = 81;
@@ -162,7 +180,7 @@ function needlePolygon(cls, cx, cy, angleDeg) {
  * `needles[0]` ends up on top.
  * `redlineAt` (a value, optional) marks the band from there to `max` in red.
  */
-function renderGauge(svg, { needles, max, step, legend, redlineAt = null }) {
+function renderGauge(svg, { needles, max, step, legend, redlineAt = null, thousands = max >= 1000 }) {
   const cx = 100;
   const cy = 100;
   const angleFor = (v) => GAUGE_START + (max > 0 ? v / max : 0) * GAUGE_SWEEP;
@@ -180,10 +198,24 @@ function renderGauge(svg, { needles, max, step, legend, redlineAt = null }) {
   defs.append(grad);
   svg.append(defs);
 
-  svg.append(svgEl("circle", { cx, cy, r: R_FACE, fill: `url(#${faceId})` }));
-  svg.append(svgEl("circle", { class: "gauge-bezel", cx, cy, r: R_BEZEL }));
+  // Flat-bottomed disk: the arc over the top closed by a straight chord along
+  // the bottom, so the bezel border (and the dark face-edge just inside it) run
+  // across the flat too — it reads as an intentional flat-bottom instrument,
+  // not a cropped circle. The chord sits a bezel half-stroke above the viewBox
+  // bottom (y=180) so the whole border shows and the flat edge lands on the
+  // element's bottom, which the gear box aligns to.
+  const flatDisk = (r) => {
+    const dx = Math.sqrt(r * r - (GAUGE_FLAT_Y - cy) ** 2);
+    return `M ${cx - dx} ${GAUGE_FLAT_Y} A ${r} ${r} 0 1 1 ${cx + dx} ${GAUGE_FLAT_Y} Z`;
+  };
+  svg.append(svgEl("path", { d: flatDisk(R_FACE), fill: `url(#${faceId})` }));
+  svg.append(svgEl("path", { class: "gauge-bezel", d: flatDisk(R_BEZEL) }));
 
-  const big = max >= 1000; // numerals in thousands to keep the dial uncluttered
+  // Numerals in thousands (with a "×1000" legend) keep a five-figure rpm dial
+  // uncluttered. It defaults on past 1000 but is a per-dial choice: the speedo
+  // opts out, so an absurdly tall final drive reading 1040 km/h shows "1040",
+  // not "1.0", even though it crosses the same threshold.
+  const big = thousands;
   const majors = Math.round(max / step);
 
   const labels = Array.from({ length: majors + 1 }, (_, i) => {
@@ -195,6 +227,10 @@ function renderGauge(svg, { needles, max, step, legend, redlineAt = null }) {
   // so three-digit scales don't collide and single-digit ones aren't tiny.
   const widest = Math.max(...labels.map((s) => s.length));
   svg.dataset.numWidth = widest <= 1 ? "narrow" : widest <= 2 ? "medium" : "wide";
+  // A 20-major speedo packs many labels near the flat top of the arc; shrink
+  // them so three-digit numbers there stop colliding. The tach (~7 majors) and
+  // a coarser speedo stay at their full size.
+  svg.dataset.dense = majors >= 10 ? "yes" : "no";
 
   for (let i = 0; i <= majors * MINOR_PER_MAJOR; i++) {
     const v = (i / MINOR_PER_MAJOR) * step;
@@ -1619,7 +1655,6 @@ function redraw() {
 
   const compare = series.length > 1;
   $("#cur_speed_out").textContent = String(Math.round(speed));
-  $("#cur_gear").textContent = series.map((s) => s.at.gear).join(" / ");
 
   // One face for both setups: the scale spans the taller redline and the red band
   // is that dial's own last major segment, so the two needles are read against the
@@ -1636,19 +1671,19 @@ function redraw() {
   // Road speed is the shared independent variable — both setups are always at the
   // slider's speed — so a second speedo needle would land exactly on the first.
   // Only the scale grows, to cover the faster setup's top speed.
-  const speedScale = gaugeScale(Math.max(1, ...series.map((s) => s.result.max_speed)));
+  const maxSpeed = Math.max(1, ...series.map((s) => s.result.max_speed));
   renderGauge($("#speedo"), {
     needles: [{ value: speed, cls: "gauge-needle" }],
-    ...speedScale,
+    ...speedoScale(maxSpeed),
     legend: [series[0].result.speed_unit],
+    thousands: false, // a speedo reads whole km/h, never "×1000"
   });
 
+  // The gear each setup holds at this speed, in the cluster between the dials.
+  // RPM is no longer shown digitally — it is read off the tach face.
   for (const s of series) {
-    const row = $(`.rpm-row[data-setup="${s.key}"]`);
-    row.querySelector("output").textContent = String(Math.round(s.at.rpm));
-    // Either setup can be asked for a speed it cannot reach, which needs more rpm
-    // than it has. Flag that rather than hide it — the needle merely pegs.
-    row.toggleAttribute("data-over", s.at.rpm > s.inputs.max_rpm + 0.5);
+    const out = s.key === "a" ? $("#cur_gear") : $(`#cur_gear_${s.key}`);
+    out.textContent = String(s.at.gear);
   }
 
   renderSpread($("#spread"), series);
@@ -1733,10 +1768,10 @@ function onCompareChange() {
   }
 
   $("#setup-tabs").hidden = !on;
-  $("#gear_scope").hidden = !on;
   $(".gauges").toggleAttribute("data-compare", on);
-  $('.rpm-row[data-setup="b"]').hidden = !on;
-  $('.rpm-row[data-setup="a"] .rpm-tag').hidden = !on;
+  // B's gear and the "/" separator show only while comparing; A is always on.
+  $("#cur_gear_b").hidden = !on;
+  $(".gear-sep").hidden = !on;
 
   // Land on B when comparison opens: it is the form the user came here to fill in.
   selectTab(on ? "b" : "a");

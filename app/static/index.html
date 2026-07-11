@@ -121,31 +121,27 @@
         <h2 id="results-heading">Results</h2>
 
         <div class="gauges">
-          <svg id="speedo" class="gauge" viewBox="0 0 200 200" role="img"
+          <!-- viewBox height 180 (not 200) crops the empty arc below the lowest
+               ticks, giving the dial a flat bottom like a real cluster and
+               shrinking the element to match, so nothing sits below that edge. -->
+          <svg id="speedo" class="gauge" viewBox="0 0 200 180" role="img"
                aria-label="Speedometer"></svg>
-          <!-- Sits where the cluster puts its warning lights, between the dials. -->
-          <div class="rpm-readout">
-            <div class="rpm-row" data-setup="a">
-              <span class="rpm-tag" hidden>A</span>
-              <output id="rpm_out" for="cur_speed">0</output>
-            </div>
-            <div class="rpm-row" data-setup="b" hidden>
-              <span class="rpm-tag">B</span>
-              <output id="rpm_out_b" for="cur_speed">0</output>
-            </div>
-            <span class="rpm-unit">rpm</span>
-          </div>
-          <svg id="tach" class="gauge" viewBox="0 0 200 200" role="img"
+          <!-- The gear indicator drops into the wedge between the dials, where a
+               cluster puts it. RPM is read off the tach face itself. -->
+          <!-- Gear per setup: A on its own in single mode (white, like the lone
+               tach needle), "A/B" while comparing (amber A, blue B, matching the
+               two coloured needles). The box is one line and a fixed 2-digit
+               width in both modes, so it does not resize when B appears. -->
+          <output class="gear-cluster" for="cur_speed">
+            <span id="cur_gear" class="gear-a">1</span>
+            <span class="gear-sep" hidden>/</span>
+            <span id="cur_gear_b" class="gear-b" hidden>1</span>
+          </output>
+          <svg id="tach" class="gauge" viewBox="0 0 200 180" role="img"
                aria-label="Tachometer"></svg>
         </div>
+        <!-- The speed slider lives in the sticky topbar. -->
 
-        <!-- The speed slider itself lives in the sticky topbar. -->
-        <div class="controls">
-          <div class="field">
-            <label for="cur_gear">Gear <span class="unit" id="gear_scope" hidden>A / B</span></label>
-            <output id="cur_gear" class="gear-readout">1</output>
-          </div>
-        </div>
 
         <!-- <details> collapses each chart with no script and no ARIA of its own.
              The SVGs are sized by viewBox, so a closed one costs nothing to keep

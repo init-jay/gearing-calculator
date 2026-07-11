@@ -2006,6 +2006,39 @@ function onShiftRpmCommit(root) {
   }
 }
 
+/**
+ * Make the speed bar scrub from anywhere along its length, on touch as well as
+ * with a mouse. The thumb is styled down to an invisible sliver — great as a
+ * fill bar, but it leaves nothing to grab, so a touch drag has no effect and the
+ * native control only jumps on a tap. Driving the value from the pointer's x
+ * position restores continuous slide, Apple-flashlight style, while the element
+ * stays a real range input so the keyboard still works.
+ */
+function initSpeedScrub() {
+  const slider = $("#cur_speed");
+  const setFromX = (clientX) => {
+    const rect = slider.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const step = parseFloat(slider.step) || 1;
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const val = Math.round((min + frac * (max - min)) / step) * step;
+    if (String(val) !== slider.value) {
+      slider.value = String(val);
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
+  slider.addEventListener("pointerdown", (e) => {
+    slider.setPointerCapture(e.pointerId);
+    setFromX(e.clientX);
+    e.preventDefault(); // suppress the native jump so our value is the only one
+  });
+  slider.addEventListener("pointermove", (e) => {
+    if (slider.hasPointerCapture(e.pointerId)) setFromX(e.clientX);
+  });
+}
+
 function wireEvents() {
   // Delegated: both setup forms are cloned at boot and their gear rows are rebuilt
   // whenever a gear is added or removed, so nothing can hold a direct listener.
@@ -2081,6 +2114,7 @@ function wireEvents() {
 
   // Only moves the needles/markers along the traces; the curves are unchanged.
   $("#cur_speed").addEventListener("input", redraw);
+  initSpeedScrub();
 
   initLapMap();
   initInputsDrawer();

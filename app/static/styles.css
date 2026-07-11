@@ -42,6 +42,46 @@
   }
 }
 
+/* Dark mode = BMW E46 gauges at night with the backlight on: a near-black face
+   with every lit mark — numerals, ticks, needle, redline, legend, and the gear
+   readout between the dials — glowing orange-red. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dial-face: #0d0704;
+    --dial-face-edge: #000000;
+    --dial-bezel: #2a1206;
+    --dial-ink: #ff5326;
+    --dial-ink-dim: #b23f1c;
+    --dial-red: #ff3a1c;
+    --dial-hub: #170a05;
+    --dial-hub-edge: #3a1c0e;
+    --dial-glow: #ff5326;
+  }
+
+  /* The backlight bloom: a tight core plus a soft halo in the ink colour around
+     each lit mark. drop-shadow works on SVG stroke/fill shapes, where
+     text-shadow does not reach. */
+  .gauge-tick-major,
+  .gauge-tick-minor,
+  .gauge-tick-label,
+  .gauge-legend,
+  .gauge-needle,
+  .gauge-redline {
+    filter: drop-shadow(0 0 0px var(--dial-glow)) drop-shadow(0 0 1px var(--dial-glow));
+  }
+
+  /* Setup B keeps its blue for legibility while comparing, so it glows blue
+     rather than clashing with the orange. Placed after the needle rule above,
+     same specificity, so it wins for the B needle. */
+  .gauge-needle-b {
+    filter: drop-shadow(0 0 0px var(--dial-blue)) drop-shadow(0 0 2px var(--dial-blue));
+  }
+
+  /* The gear number sits among the dials, so it glows with them. */
+  .gear-a { text-shadow: 0 0 0.5cqw var(--dial-glow); }
+  .gear-b { text-shadow: 0 0 0.5cqw var(--dial-blue); }
+}
+
 * { box-sizing: border-box; }
 
 /* Must beat the `display` rules below (e.g. .loading{display:grid}), which

@@ -13,6 +13,21 @@
   <!-- Pyodide is *not* loaded here: app.js injects it from wherever config.json
        points, either the vendored copy on this origin or a CDN. A script tag
        naming the vendored path would silently defeat that switch. -->
+  <!-- Resolve the theme before first paint so there is no light-to-dark flash.
+       The dash light-switch position lives in localStorage: "auto" (or unset)
+       follows the system, "light"/"dark" force it. app.js keeps this in sync. -->
+  <script>
+    (function () {
+      try {
+        var pref = localStorage.getItem("gc-theme") || "auto";
+        var dark = pref === "dark" ||
+          (pref !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
 </head>
 <body>
   <div id="loading" class="loading">
@@ -63,6 +78,33 @@
         </label>
         <input type="range" id="cur_speed" min="0" max="277" step="1" value="100" />
       </div>
+
+      <!-- A BMW headlight-switch for the page theme, sized as a big touch target:
+           the whole SVG is one button that advances one position clockwise per
+           tap — AUTO (left, follow the system) -> 0 (top, force light) -> lights
+           (right, force dark) -> wraps back to AUTO. app.js sets data-theme-pref;
+           CSS rotates the knob to match, and the wrap animates counter-clockwise
+           (50deg -> -50deg sweeps back through the top). -->
+      <button type="button" id="theme-switch" class="lightswitch"
+              data-theme-pref="auto" aria-label="Theme: automatic. Tap to change.">
+        <svg class="lightswitch-svg" viewBox="0 0 100 100" aria-hidden="true">
+          <!-- Fixed bezel: the semicircular status track and the three marks. -->
+          <path class="ls-arc" d="M 12 50 A 38 38 0 0 1 88 50" />
+          <text class="ls-mark" x="20.9" y="25.6">A</text>
+          <text class="ls-mark" x="50" y="12">0</text>
+          <!-- Light-bulb at the right mark (force dark = switch the lights on). -->
+          <g class="ls-mark-on" transform="translate(79.1 25.6)">
+            <circle cx="0" cy="-1.5" r="5" />
+            <path class="ls-bulb-base" d="M -2.4 3.8 h 4.8 M -1.7 5.8 h 3.4" />
+          </g>
+          <!-- Rotating knob: an open ring with a grip pill and its position notch. -->
+          <g class="ls-knob">
+            <circle class="ls-knob-disc" cx="50" cy="50" r="27" />
+            <rect class="ls-knob-grip" x="43.5" y="27" width="13" height="42" rx="6.5" />
+            <rect class="ls-knob-notch" x="48.4" y="30.5" width="3.2" height="8" rx="1.6" />
+          </g>
+        </svg>
+      </button>
     </div>
 
     <!-- Click-away target behind the drawer; sits under it in z-order. -->
@@ -228,7 +270,7 @@
              schedule, so with comparison on it draws one map per setup:
              the same track, colored by the gear each gearset would hold. -->
         <fieldset id="lap-color-by" class="lap-color-by" hidden>
-          <legend>Color by</legend>
+          <legend>Colour by</legend>
           <label>
             <input type="radio" name="lap-color" value="speed" checked />
             <span>Speed</span>

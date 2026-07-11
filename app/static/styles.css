@@ -37,61 +37,63 @@
   /* Setup B, everywhere it appears: needle, redline, trace, tab, readout. One
      fixed hue so the dial keeps its palette and the chart still matches it. */
   --dial-blue: #3b9ae1;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1216;
-    --panel: #171b21;
-    --text: #e7eaee;
-    --muted: #9aa4b1;
-    --border: #2a313a;
-    --accent: #6f9bff;
-    --accent-soft: #1c2534;
-    --grid: #262d36;
-    --needle: #ff6b6b;
-  }
+/* Light/dark is resolved in JS from the dash light-switch (auto / off / on) plus
+   the system preference, then stamped as data-theme on <html> — so the styling
+   keys off that attribute, never `prefers-color-scheme` directly. An inline head
+   script sets it before first paint; the switch and system changes keep it live. */
+:root[data-theme="dark"] {
+  --bg: #0f1216;
+  --panel: #171b21;
+  --text: #e7eaee;
+  --muted: #9aa4b1;
+  --border: #2a313a;
+  --accent: #6f9bff;
+  --accent-soft: #1c2534;
+  --grid: #262d36;
+  --needle: #ff6b6b;
+  color-scheme: dark;
 }
 
 /* Dark mode = BMW E46 gauges at night with the backlight on: a near-black face
    with every lit mark — numerals, ticks, needle, redline, legend, and the gear
    readout between the dials — glowing the warm amber of the E46 M3 cluster. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --dial-face: #0d0803;
-    --dial-face-edge: #000000;
-    --dial-bezel: #33200a;
-    --dial-ink: #ffa724;
-    --dial-ink-dim: #b8781a;
-    --dial-red: #ff3a1c;
-    --dial-hub: #180f05;
-    --dial-hub-edge: #3d2810;
-    --dial-glow: #ffab2e;
-  }
-
-  /* The backlight bloom: a tight core plus a soft halo in the ink colour around
-     each lit mark. drop-shadow works on SVG stroke/fill shapes, where
-     text-shadow does not reach. */
-  .gauge-tick-major,
-  .gauge-tick-minor,
-  .gauge-tick-label,
-  .gauge-legend,
-  .gauge-needle,
-  .gauge-redline {
-    filter: drop-shadow(0 0 0px var(--dial-glow)) drop-shadow(0 0 1px var(--dial-glow));
-  }
-
-  /* Setup B keeps its blue for legibility while comparing, so it glows blue
-     rather than clashing with the orange. Placed after the needle rule above,
-     same specificity, so it wins for the B needle. */
-  .gauge-needle-b {
-    filter: drop-shadow(0 0 0px var(--dial-blue)) drop-shadow(0 0 2px var(--dial-blue));
-  }
-
-  /* The gear number sits among the dials, so it glows with them. */
-  .gear-a { text-shadow: 0 0 0.5cqw var(--dial-glow); }
-  .gear-b { text-shadow: 0 0 0.5cqw var(--dial-blue); }
+:root[data-theme="dark"] {
+  --dial-face: #0d0803;
+  --dial-face-edge: #000000;
+  --dial-bezel: #33200a;
+  --dial-ink: #ffa724;
+  --dial-ink-dim: #b8781a;
+  --dial-red: #ff3a1c;
+  --dial-hub: #180f05;
+  --dial-hub-edge: #3d2810;
+  --dial-glow: #ffab2e;
 }
+
+/* The backlight bloom: a tight core plus a soft halo in the ink colour around
+   each lit mark. drop-shadow works on SVG stroke/fill shapes, where
+   text-shadow does not reach. */
+:root[data-theme="dark"] .gauge-tick-major,
+:root[data-theme="dark"] .gauge-tick-minor,
+:root[data-theme="dark"] .gauge-tick-label,
+:root[data-theme="dark"] .gauge-legend,
+:root[data-theme="dark"] .gauge-needle,
+:root[data-theme="dark"] .gauge-redline {
+  filter: drop-shadow(0 0 0px var(--dial-glow)) drop-shadow(0 0 1px var(--dial-glow));
+}
+
+/* Setup B keeps its blue for legibility while comparing, so it glows blue
+   rather than clashing with the orange. Placed after the needle rule above,
+   same specificity, so it wins for the B needle. */
+:root[data-theme="dark"] .gauge-needle-b {
+  filter: drop-shadow(0 0 0px var(--dial-blue)) drop-shadow(0 0 2px var(--dial-blue));
+}
+
+/* The gear number sits among the dials, so it glows with them. */
+:root[data-theme="dark"] .gear-a { text-shadow: 0 0 0.5cqw var(--dial-glow); }
+:root[data-theme="dark"] .gear-b { text-shadow: 0 0 0.5cqw var(--dial-blue); }
 
 * { box-sizing: border-box; }
 
@@ -256,6 +258,60 @@ main {
 .hamburger:hover { border-color: var(--accent); }
 .hamburger svg { display: block; }
 .hamburger svg polygon { fill: currentColor; }
+
+/* ---------------------------- theme light-switch ------------------------- */
+
+/* The car's headlight switch as one big tap target: an SVG button whose knob
+   turns between three marks on a status semicircle — AUTO (left), 0 (top), and
+   the headlight symbol (right). Each tap advances the knob one position; app.js
+   sets data-theme-pref and CSS rotates .ls-knob to match. */
+.lightswitch {
+  flex: 0 0 auto;
+  width: 3.4rem;
+  height: 3.4rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lightswitch-svg { display: block; width: 100%; height: 100%; }
+
+.lightswitch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+
+/* Fixed bezel: status arc and the position marks. */
+.ls-arc { fill: none; stroke: var(--border); stroke-width: 4; stroke-linecap: round; }
+.ls-mark { fill: var(--muted); font-size: 15px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.ls-mark-on { fill: var(--muted); }
+.ls-mark-on .ls-bulb-base { fill: none; stroke: var(--muted); stroke-width: 1.7; stroke-linecap: round; }
+
+/* The active mark lights up amber, echoing the instrument backlighting. */
+.lightswitch[data-theme-pref="light"] .ls-mark:nth-of-type(2),
+.lightswitch[data-theme-pref="auto"] .ls-mark:nth-of-type(1) { fill: var(--dial-amber); }
+.lightswitch[data-theme-pref="dark"] .ls-mark-on { fill: var(--dial-amber); }
+.lightswitch[data-theme-pref="dark"] .ls-mark-on .ls-bulb-base { stroke: var(--dial-amber); }
+
+/* The knob turns about the dial centre; the wrap from dark (50deg) back to auto
+   (-50deg) interpolates through 0, so it reads as a counter-clockwise reset. */
+.ls-knob {
+  transform-box: view-box;
+  transform-origin: 50px 50px;
+  transition: transform 0.32s cubic-bezier(0.33, 1.15, 0.5, 1);
+}
+.lightswitch[data-theme-pref="auto"] .ls-knob { transform: rotate(-50deg); }
+.lightswitch[data-theme-pref="light"] .ls-knob { transform: rotate(0deg); }
+.lightswitch[data-theme-pref="dark"] .ls-knob { transform: rotate(50deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ls-knob { transition: none; }
+}
+
+/* An open ring, so the page shows through and the grip's rotation reads clearly.
+   The mid-grey rim reads against both the light page and the near-black dark one. */
+.ls-knob-disc { fill: none; stroke: #3a3f46; stroke-width: 1.5; }
+.ls-knob-grip { fill: #34383e; }
+.ls-knob-notch { fill: #eef0f3; }
 
 /* ------------------------------ inputs drawer ---------------------------- */
 

@@ -1252,18 +1252,70 @@ const GEAR_PALETTE = {
   dark: ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e66767", "#d55181", "#d95926"],
 };
 
-const darkMode = matchMedia("(prefers-color-scheme: dark)");
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+const THEME_KEY = "gc-theme"; // light-switch position: "auto" | "light" | "dark"
+
+/** The dash light-switch position, persisted across visits (default "auto"). */
+const themePref = () => localStorage.getItem(THEME_KEY) || "auto";
+
+/** Whether the page is currently dark, per the resolved data-theme attribute
+ *  (JS keeps it in sync with the switch and, in auto, the system preference). */
+const isDark = () => document.documentElement.dataset.theme === "dark";
+
+/** Resolve the switch position + system preference to a concrete scheme, stamp
+ *  it on <html>, and redraw the one thing whose colors are baked in JS rather
+ *  than CSS variables (the lap map's per-segment strokes). Everything else —
+ *  the gauges, the page chrome — restyles from the attribute on its own. */
+function applyTheme() {
+  const pref = themePref();
+  const dark = pref === "dark" || (pref !== "light" && systemDark.matches);
+  const next = dark ? "dark" : "light";
+  const root = document.documentElement;
+  if (root.dataset.theme === next) return;
+  root.dataset.theme = next;
+  if (lapState.data) renderLapSection();
+}
+
+// Switch positions in clockwise order, so a tap just steps to the next one and
+// wraps: auto (left) -> light (top) -> dark (right) -> auto.
+const THEME_ORDER = ["auto", "light", "dark"];
+const THEME_LABEL = { auto: "automatic", light: "light", dark: "dark" };
+
+/** Reflect a switch position on the button (rotation + label) and apply it. */
+function setThemePref(pref) {
+  localStorage.setItem(THEME_KEY, pref);
+  const btn = $("#theme-switch");
+  btn.dataset.themePref = pref;
+  btn.setAttribute("aria-label", `Theme: ${THEME_LABEL[pref]}. Tap to change.`);
+  applyTheme();
+}
+
+/** Wire the headlight switch: each tap advances one position; keep auto honest. */
+function initThemeSwitch() {
+  const btn = $("#theme-switch");
+  const pref = themePref();
+  btn.dataset.themePref = pref;
+  btn.setAttribute("aria-label", `Theme: ${THEME_LABEL[pref]}. Tap to change.`);
+  btn.addEventListener("click", () => {
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(themePref()) + 1) % THEME_ORDER.length];
+    setThemePref(next);
+  });
+  // Follow the system only while the switch is on AUTO; a forced choice ignores it.
+  systemDark.addEventListener("change", () => {
+    if (themePref() === "auto") applyTheme();
+  });
+}
 
 /** Color for a normalized speed t in [0, 1] under the current color scheme. */
 function speedColor(t) {
-  const ramp = darkMode.matches ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
+  const ramp = isDark() ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
   const i = Math.min(ramp.length - 1, Math.max(0, Math.round(t * (ramp.length - 1))));
   return ramp[i];
 }
 
 /** Color for a 1-based gear under the current color scheme. */
 function gearColor(gear) {
-  const slots = GEAR_PALETTE[darkMode.matches ? "dark" : "light"];
+  const slots = GEAR_PALETTE[isDark() ? "dark" : "light"];
   return slots[Math.min(Math.max(gear, 1), slots.length) - 1];
 }
 
@@ -1298,11 +1350,9 @@ function initLapMap() {
   // The cornering threshold lives in the strategy blurb, which only shows in
   // gear mode — the only mode the value affects.
   $("#lap-corner-g").addEventListener("input", renderLapSection);
-  // The colors are baked into stroke attributes, not CSS variables, so a
-  // scheme flip has to redraw rather than restyle.
-  darkMode.addEventListener("change", () => {
-    if (lapState.data) renderLapSection();
-  });
+  // A scheme flip redraws the lap map (its stroke colors are baked in, not CSS
+  // variables); that redraw is driven from applyTheme, wherever the flip came
+  // from — the switch or, in auto, the system.
 }
 
 async function onLapFile(e) {
@@ -1555,7 +1605,7 @@ function renderLapLegend(el, lap, specs) {
   hi.textContent = `${speedInUnits(lap.speed_max).toFixed(0)} ${lapSpeedUnit()}`;
   const bar = document.createElement("div");
   bar.className = "lap-scale";
-  const ramp = darkMode.matches ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
+  const ramp = isDark() ? [...SPEED_RAMP].reverse() : SPEED_RAMP;
   bar.style.background = `linear-gradient(to right, ${ramp.join(", ")})`;
   scale.append(lo, bar, hi);
   el.append(scale);
@@ -1905,6 +1955,7 @@ function wireEvents() {
 
   initLapMap();
   initInputsDrawer();
+  initThemeSwitch();
 }
 
 async function main() {

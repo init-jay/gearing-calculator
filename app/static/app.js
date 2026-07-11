@@ -1165,6 +1165,119 @@ function copySetup(from, to) {
   }
 }
 
+/* ----------------------------- export / import --------------------------- */
+
+/**
+ * A setup as plain JSON: the raw field strings (minus the derived tire diameter),
+ * gear ratios, torque points and preset selections. Strings, not numbers, so a
+ * round-trip reproduces exactly what was on screen.
+ */
+function serializeSetup(root) {
+  const fields = {};
+  root.querySelectorAll("[data-field]").forEach((el) => {
+    if (el.dataset.field !== "tire") fields[el.dataset.field] = el.value;
+  });
+  const presetSel = {};
+  for (const kind of Object.keys(PRESET_GROUPS)) presetSel[kind] = presetSelect(root, kind).value;
+  return {
+    fields,
+    gears: gearInputs(root).map((el) => el.value),
+    torque_curve: curveRows(root).map((row) => [
+      row.querySelector(".curve-rpm").value,
+      row.querySelector(".curve-torque").value,
+    ]),
+    presets: presetSel,
+  };
+}
+
+const isSetupData = (s) =>
+  s && typeof s === "object" && (Array.isArray(s.gears) || (s.fields && typeof s.fields === "object"));
+
+/**
+ * Write a serialized setup back into a form. `fromUnits` is the unit system the
+ * file was saved in; only the weight and torque curve depend on it, so those are
+ * restated when it differs from what is on screen. Everything else is a ratio or
+ * a unit-agnostic spec, and the tire diameter is re-derived by `updateTireDiameter`.
+ */
+function applySetupData(root, data, fromUnits) {
+  buildGearRows(root, (data.gears || []).map(Number).filter((v) => Number.isFinite(v) && v > 0));
+  buildCurveRows(root, (data.torque_curve || [])
+    .map((p) => [Number(p[0]), Number(p[1])])
+    .filter(([r, t]) => Number.isFinite(r) && Number.isFinite(t)));
+  for (const [name, value] of Object.entries(data.fields || {})) {
+    const el = field(root, name);
+    if (el) el.value = String(value);
+  }
+  for (const kind of Object.keys(PRESET_GROUPS)) {
+    if (data.presets && kind in data.presets) presetSelect(root, kind).value = String(data.presets[kind]);
+  }
+  if ((fromUnits === "metric" || fromUnits === "imperial") && fromUnits !== currentUnits()) {
+    buildCurveRows(root, convertCurve(readCurve(root), currentUnits()));
+    field(root, "weight").value = convertWeight(num(root, "weight", 1400), currentUnits()).toFixed(0);
+  }
+  updateTireDiameter(root);
+}
+
+function showIoStatus(msg, isError) {
+  const el = $("#io-status");
+  el.textContent = msg;
+  el.hidden = false;
+  el.classList.toggle("io-status-error", !!isError);
+}
+
+/** Save the active setups — A alone, or A and B while comparing — to a file. */
+function exportInputs() {
+  const payload = {
+    app: "gearing-calculator",
+    version: 1,
+    units: currentUnits(),
+    setups: activeKeys().map((k) => serializeSetup(setupRoot(k))),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "gearing-setup.json";
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showIoStatus(payload.setups.length > 1 ? "Exported Setups A and B." : "Exported Setup A.", false);
+}
+
+/**
+ * Load setups from a file. One setup fills B (the comparison target); two fill A
+ * and B. Import is offered only while comparing, so B always exists to receive it.
+ */
+async function importInputs(file) {
+  let payload;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch {
+    showIoStatus("Could not read that file — is it a valid JSON export?", true);
+    return;
+  }
+  const setups = Array.isArray(payload?.setups) ? payload.setups.filter(isSetupData) : [];
+  if (setups.length === 0) {
+    showIoStatus("No setups found in that file.", true);
+    return;
+  }
+  const from = payload.units;
+
+  if (setups.length === 1) {
+    applySetupData(setupRoot(comparing() ? "b" : "a"), setups[0], from);
+  } else {
+    applySetupData(setupRoot("a"), setups[0], from);
+    applySetupData(setupRoot("b"), setups[1], from);
+  }
+  // B now holds imported data; don't let a later compare-toggle overwrite it with A.
+  seededB = true;
+  recompute();
+  const where = setups.length > 1 ? "Imported Setups A and B."
+    : comparing() ? "Imported into Setup B." : "Imported Setup A.";
+  showIoStatus(where, false);
+}
+
 /* ------------------------------ inputs drawer ---------------------------- */
 
 /* Matches the CSS breakpoint where the drawer becomes an inline column. The
@@ -1856,6 +1969,8 @@ function onCompareChange() {
   }
 
   $("#setup-tabs").hidden = !on;
+  // Import lands a lone setup in B, so it is only meaningful once B exists.
+  $("#import-setups").hidden = !on;
   $(".gauges").toggleAttribute("data-compare", on);
   // B's gear and the "/" separator show only while comparing; A is always on.
   $("#cur_gear_b").hidden = !on;
@@ -1987,6 +2102,14 @@ function wireEvents() {
   document.querySelectorAll('input[name="units"]').forEach((el) =>
     el.addEventListener("change", onUnitChange)
   );
+
+  $("#export-setups").addEventListener("click", exportInputs);
+  $("#import-setups").addEventListener("click", () => $("#import-file").click());
+  $("#import-file").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) importInputs(file);
+    e.target.value = ""; // let the same file be picked again
+  });
 
   // Only moves the needles/markers along the traces; the curves are unchanged.
   $("#cur_speed").addEventListener("input", redraw);

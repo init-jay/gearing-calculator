@@ -140,6 +140,16 @@
           <span>Compare two setups</span>
         </label>
 
+        <!-- Save the current inputs to a file, or restore them from one. Import
+             only appears while comparing: a lone setup in the file loads into
+             Setup B, so there is somewhere to put it and something to compare. -->
+        <div class="io-controls">
+          <button type="button" id="export-setups" class="io-btn">Export inputs</button>
+          <button type="button" id="import-setups" class="io-btn" hidden>Import inputs</button>
+          <input type="file" id="import-file" accept=".json,application/json" hidden />
+        </div>
+        <p id="io-status" class="io-status" role="status" hidden></p>
+
         <div class="tabs" id="setup-tabs" role="tablist" aria-label="Setup" hidden>
           <button type="button" role="tab" id="tab-a" data-setup="a"
                   aria-controls="setup-a" aria-selected="true">Setup A</button>

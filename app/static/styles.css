@@ -55,18 +55,18 @@
 
 /* Dark mode = BMW E46 gauges at night with the backlight on: a near-black face
    with every lit mark — numerals, ticks, needle, redline, legend, and the gear
-   readout between the dials — glowing orange-red. */
+   readout between the dials — glowing the warm amber of the E46 M3 cluster. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --dial-face: #0d0704;
+    --dial-face: #0d0803;
     --dial-face-edge: #000000;
-    --dial-bezel: #2a1206;
-    --dial-ink: #ff5326;
-    --dial-ink-dim: #b23f1c;
+    --dial-bezel: #33200a;
+    --dial-ink: #ffa724;
+    --dial-ink-dim: #b8781a;
     --dial-red: #ff3a1c;
-    --dial-hub: #170a05;
-    --dial-hub-edge: #3a1c0e;
-    --dial-glow: #ff5326;
+    --dial-hub: #180f05;
+    --dial-hub-edge: #3d2810;
+    --dial-glow: #ffab2e;
   }
 
   /* The backlight bloom: a tight core plus a soft halo in the ink colour around

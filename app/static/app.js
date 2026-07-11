@@ -133,10 +133,10 @@ const R_FACE = 95;
 // and that edge lands exactly on the element's bottom. Below every tick (y≈162)
 // and label, so the flat only removes the empty dial arc.
 const GAUGE_FLAT_Y = 178.75;
-const R_TICK = 88; // outer edge of the tick ring; ticks grow inward from here
+const R_TICK = 91.5; // outer edge of the tick ring; a small gap to the rim (R_FACE 95), not flush
 const R_MAJOR_IN = 76;
 const R_MINOR_IN = 81;
-const R_RED = 84; // centreline of the redline arc, spanning the tick ring's width
+const R_RED = R_TICK - 4; // centreline of the redline arc (width 8), so its outer edge caps the tick ring
 const R_LABEL = 62;
 const R_NEEDLE = 70;
 const R_HUB = 13;

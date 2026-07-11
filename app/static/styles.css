@@ -658,7 +658,7 @@ fieldset.units label {
 .gauge-face-edge { stop-color: var(--dial-face-edge); }
 .gauge-bezel { fill: none; stroke: var(--dial-bezel); stroke-width: 2.5; }
 .gauge-tick-major { stroke: var(--dial-ink); stroke-width: 3.2; stroke-linecap: butt; }
-.gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1.8; }
+.gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1; }
 /* Stroke width spans the tick ring, so the arc reads as a band on the dial edge. */
 .gauge-redline { fill: none; stroke: var(--dial-red); stroke-width: 8; stroke-linecap: butt; }
 /* Numerals are sized to the widest label on the dial (see `numWidth` in app.js):

@@ -2013,6 +2013,13 @@ function onShiftRpmCommit(root) {
  * native control only jumps on a tap. Driving the value from the pointer's x
  * position restores continuous slide, Apple-flashlight style, while the element
  * stays a real range input so the keyboard still works.
+ *
+ * Touch gets its own listeners rather than riding on pointer events: right after
+ * a page scroll, iOS spends the first touch on halting the residual momentum and
+ * never fires that touch's `pointerdown`, so a pointer-only scrubber ignored the
+ * first tap and needed a second. `touchstart` still fires in that case, and
+ * touch events implicitly capture to their start target, so a drag keeps
+ * tracking even past the bar's edges.
  */
 function initSpeedScrub() {
   const slider = $("#cur_speed");
@@ -2029,14 +2036,27 @@ function initSpeedScrub() {
       slider.dispatchEvent(new Event("input", { bubbles: true }));
     }
   };
+
+  // Mouse / stylus: pointer events with capture. Touch is handled below instead,
+  // so it doesn't double up or lean on the pointerdown iOS may withhold.
   slider.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") return;
     slider.setPointerCapture(e.pointerId);
     setFromX(e.clientX);
     e.preventDefault(); // suppress the native jump so our value is the only one
   });
   slider.addEventListener("pointermove", (e) => {
-    if (slider.hasPointerCapture(e.pointerId)) setFromX(e.clientX);
+    if (e.pointerType !== "touch" && slider.hasPointerCapture(e.pointerId)) setFromX(e.clientX);
   });
+
+  // Touch: non-passive so preventDefault claims the gesture immediately, which
+  // both scrubs on the first touch and suppresses the compatibility mouse events.
+  const onTouch = (e) => {
+    setFromX(e.touches[0].clientX);
+    e.preventDefault();
+  };
+  slider.addEventListener("touchstart", onTouch, { passive: false });
+  slider.addEventListener("touchmove", onTouch, { passive: false });
 }
 
 function wireEvents() {

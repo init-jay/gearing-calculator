@@ -53,6 +53,9 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  /* The full-bleed topbar is sized with 100vw, which includes the scrollbar
+     gutter; clip the sliver rather than growing a horizontal scrollbar. */
+  overflow-x: clip;
 }
 
 /* ------------------------------- loading -------------------------------- */
@@ -142,21 +145,24 @@ main {
 
 /* Pinned toolbar: hamburger + speed slider follow the scroll, so any chart
    can be read against a different speed or setup without scrolling back up.
+   Styled as page background, not a card: it bleeds to the viewport edges
+   (the negative margins undo main's centering) and sits flush at the top,
+   so the results scroll *under* a header rather than behind a floating bar.
    Below the drawer and its backdrop in z-order, so opening Inputs dims it. */
 .topbar {
   position: sticky;
-  top: 0.5rem;
+  top: 0;
   z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem 1.25rem;
-  padding: 0.6rem 1rem;
-  margin-bottom: 1.5rem;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 0.25rem 1rem rgba(0, 0, 0, 0.08);
+  margin: 0 calc(50% - 50vw) 1.5rem;
+  /* main is 76rem with 1rem side padding: this realigns the bar's contents
+     with the panels below while its background runs edge to edge. */
+  padding: 0.75rem max(1rem, 50vw - 37rem);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 
 .topbar-speed {

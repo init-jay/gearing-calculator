@@ -1131,8 +1131,14 @@ function copySetup(from, to) {
 
 /* ------------------------------ inputs drawer ---------------------------- */
 
-/** Open/close the off-canvas inputs panel. Results keep updating live behind
- * the backdrop, so tweaking a ratio shows its effect without closing. */
+/* Matches the CSS breakpoint where the drawer becomes an inline column. The
+ * hamburger serves both modes: overlay drawer on phones, column collapse on
+ * desktop — two orthogonal states, each ignored by the other mode's CSS. */
+const desktopLayout = matchMedia("(min-width: 56.25rem)");
+
+/** Open/close the off-canvas inputs panel (phone mode). Results keep updating
+ * live behind the backdrop, so tweaking a ratio shows its effect without
+ * closing. */
 function setInputsDrawer(open) {
   $("#inputs-drawer").classList.toggle("open", open);
   $("#drawer-backdrop").hidden = !open;
@@ -1145,14 +1151,33 @@ function setInputsDrawer(open) {
 }
 
 function initInputsDrawer() {
-  $("#inputs-toggle").addEventListener("click", () => setInputsDrawer(true));
+  const toggle = $("#inputs-toggle");
+  toggle.addEventListener("click", () => {
+    if (desktopLayout.matches) {
+      const collapsed = $(".layout").classList.toggle("inputs-collapsed");
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+    } else {
+      setInputsDrawer(true);
+    }
+  });
   $("#inputs-close").addEventListener("click", () => setInputsDrawer(false));
   $("#drawer-backdrop").addEventListener("click", () => setInputsDrawer(false));
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && $("#inputs-drawer").classList.contains("open")) {
+    if (e.key === "Escape" && !desktopLayout.matches &&
+        $("#inputs-drawer").classList.contains("open")) {
       setInputsDrawer(false);
     }
   });
+
+  // aria-expanded answers for whichever mode is live, on load and whenever a
+  // resize crosses the breakpoint.
+  const syncAria = () => toggle.setAttribute("aria-expanded", String(
+    desktopLayout.matches
+      ? !$(".layout").classList.contains("inputs-collapsed")
+      : $("#inputs-drawer").classList.contains("open")
+  ));
+  desktopLayout.addEventListener("change", syncAria);
+  syncAria();
 }
 
 /* -------------------------------- lap map -------------------------------- */

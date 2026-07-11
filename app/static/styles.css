@@ -140,8 +140,19 @@ main {
   color: var(--muted);
 }
 
-/* One column: the inputs live in the drawer, so results take the width. */
+/* Phone-first: one column, with the inputs in the hamburger drawer. Wide
+   screens (the old two-column threshold) put the inputs panel back in the
+   flow beside the results — the drawer chrome only exists below it. */
 .layout { display: block; }
+
+@media (min-width: 56.25rem) {
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+}
 
 /* Pinned toolbar: hamburger + speed slider follow the scroll, so any chart
    can be read against a different speed or setup without scrolling back up.
@@ -191,7 +202,8 @@ main {
 }
 
 .hamburger:hover { border-color: var(--accent); }
-.hamburger svg { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.hamburger svg { display: block; }
+.hamburger svg polygon { fill: currentColor; }
 
 /* ------------------------------ inputs drawer ---------------------------- */
 
@@ -242,6 +254,36 @@ main {
   inset: 0;
   z-index: 10;
   background: rgba(0, 0, 0, 0.4);
+}
+
+/* Wide screens: the drawer chrome dissolves and the inputs become the plain
+   panel sitting in the layout grid's first column. The hamburger survives as
+   a collapse toggle for that column (see .inputs-collapsed). Placed after the
+   base drawer rules — same specificity, so order is what makes these win. */
+@media (min-width: 56.25rem) {
+  .drawer-close { display: none; }
+
+  /* Covers a drawer left open across a resize; [hidden] handles the rest. */
+  .drawer-backdrop { display: none; }
+
+  .inputs-drawer {
+    position: static;
+    /* The drawer's z-index would otherwise still bite here: z-index applies
+       to grid items even at position: static, and this panel is now a grid
+       item — leaving it at 20 paints it over the sticky topbar (z 5). */
+    z-index: auto;
+    width: auto;
+    transform: none;
+    transition: none;
+    overflow: visible;
+    border-radius: var(--radius);
+    box-shadow: none;
+  }
+
+  /* Hamburger toggled off: the inputs column folds away and the results take
+     the full row. Mobile ignores this class — its drawer overlays instead. */
+  .layout.inputs-collapsed { grid-template-columns: 1fr; }
+  .layout.inputs-collapsed .inputs-drawer { display: none; }
 }
 
 .panel {

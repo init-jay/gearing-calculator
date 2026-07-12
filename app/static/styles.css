@@ -1233,6 +1233,12 @@ tbody td.is-current { background: var(--accent-soft); }
   cursor: pointer;
   touch-action: none; /* a press holds to ramp, never scrolls or selects */
   -webkit-tap-highlight-color: transparent;
+  /* A multi-second hold is the pedals' whole interaction, so suppress the
+     browser's long-press responses too (iOS magnifier loupe / callout), which
+     otherwise kick in mid-hold and look like the page zooming on the pedal. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.3));
   transition: transform 0.08s ease;
 }

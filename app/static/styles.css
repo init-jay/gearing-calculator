@@ -807,10 +807,10 @@ fieldset.units label {
   /* Daylight pod: the same near-black amber as the gear readout's phosphor
      tile, so pod and LCD read as one material — and still darker than the
      dial faces' gradient edge, so the dials lift out of it. */
-  --pod-face: #d8dbe0;
+  --pod-face: #fff;
   /* Chrome kept lean: just enough hood over the dials for the arch to
      clear their rings, so the pod spends its pixels on gauges, not face. */
-  padding: 8.5cqw 3.5cqw 2.5cqw;
+  padding: 1cqw 3.5cqw 2.5cqw;
   gap: 2.4cqw;
 }
 /* The pod face lives on a pseudo rather than the element's own background:
@@ -824,14 +824,14 @@ fieldset.units label {
   inset: 0;
   z-index: -1;
   background: var(--pod-face);
-  border: 1px solid var(--border);
+  border: 1px solid #fff;
   /* Elliptical top radii spanning half the width each make the whole top
      edge one continuous arch over both dials — a single rainbow hood, not
      a rectangle and not a per-dial double binnacle. (Pseudo-element cqw
      resolves against .gauges itself, whose content box is 93cqw of .dash,
      hence these values are the .dash-relative ones divided by 0.93.) */
-  border-radius: 50% 50% 7.6cqw 7.6cqw / 28cqw 28cqw 7.6cqw 7.6cqw;
-  box-shadow: 0 0.6rem 1.2rem -0.7rem rgba(0, 0, 0, 0.55);
+  border-radius: 50% 50% 7.6cqw 7.6cqw / 28cqw 28cqw 0cqw 0cqw;
+  /* box-shadow: 0 0.6rem 1.2rem -0.7rem rgba(0, 0, 0, 0.55); */
 }
 /* Dark cabin: black like the cards, bezel included — the pod is an
    invisible surface; only its drop shadow and the lit dials give it away. */

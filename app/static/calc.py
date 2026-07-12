@@ -931,6 +931,67 @@ def acceleration(inputs: Inputs) -> Accel | None:
     )
 
 
+def accel_profile(
+    data: dict, target_speed: float, steps: int = ACCEL_STEPS
+) -> dict | None:
+    """Speed-vs-time trace of a standing-start run to ``target_speed``: dict in, dict out.
+
+    Returns ``{"speed": [...], "time": [...]}`` — display-unit speeds and the
+    seconds-from-rest to reach each, both monotonic and index-aligned — or
+    ``None`` when there is no run to trace (no torque curve, or the car tops out
+    below ``target_speed``), the same condition as :func:`accel_time`.
+
+    Integrated exactly like :func:`_accel_run`, but recording the cumulative time
+    as it goes and charging a gear's dead time the moment the run crosses its
+    shift point. So the time at any speed matches what :func:`accel_time` would
+    return for it — which is what lets the on-screen accelerator ramp in real
+    time: hold it for the setup's 0-100 and it arrives at 100.
+
+    The output is decimated to a few hundred points (the integration itself stays
+    full-resolution) — enough to interpolate smoothly without shipping every step.
+    """
+    inputs = Inputs.from_dict(data)
+    if _accel_run(inputs, target_speed, steps) is None:
+        return None
+
+    metric = inputs.units == "metric"
+    to_mps = MPS_PER_KMH if metric else MPS_PER_MPH
+    force_to_n = 1.0 if metric else N_PER_LBF
+    mass = inputs.weight if metric else inputs.weight * KG_PER_LB
+    grip_force = traction_limit(inputs) * force_to_n
+
+    shift_speeds = [s.speed for s in shift_points(inputs)]
+    n_gears = len(inputs.gears)
+
+    delta = target_speed * to_mps / steps
+    keep = max(1, steps // 300)
+    speeds = [0.0]
+    times = [0.0]
+    seconds = 0.0
+    crossed = 0
+    for k in range(steps):
+        speed = (k + 0.5) * delta / to_mps
+        gear = _gear_from_shifts(shift_speeds, speed, n_gears)
+        ratio = inputs.gears[gear - 1]
+        engine_force = _effort(inputs, ratio, _rpm(inputs, speed, ratio)) * force_to_n
+        force = min(engine_force, grip_force)
+        spin = 1.04 + 0.0025 * overall_ratio(ratio, inputs.final_drive, inputs.transfer) ** 2
+        seconds += delta / (force / (mass * spin))
+
+        v_end = (k + 1) * delta / to_mps
+        # Dead time lands as the run passes each shift point, so it shows up in the
+        # trace at the right speed rather than all bunched at the finish.
+        while crossed < len(shift_speeds) and shift_speeds[crossed] < v_end:
+            seconds += inputs.shift_time
+            crossed += 1
+
+        if (k + 1) % keep == 0 or k == steps - 1:
+            speeds.append(v_end)
+            times.append(seconds)
+
+    return {"speed": speeds, "time": times}
+
+
 @dataclass
 class Result:
     """Computed output for a set of inputs."""

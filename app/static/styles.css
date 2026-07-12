@@ -1184,3 +1184,82 @@ tbody td.is-current { background: var(--accent-soft); }
   border-radius: 6px;
   text-align: right;
 }
+
+/* ------------------------------- pedals --------------------------------- */
+/* Phone-only footwell floating over the bottom of the page. The row itself is
+   click-through (pointer-events: none); only the two pedals take input, so the
+   gap between them doesn't swallow taps on the content behind. */
+.pedals {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4; /* under the topbar (5) and the drawer, over the page content */
+  display: flex;
+  /* Clustered bottom-right, under a right-handed thumb; tops aligned, so the
+     shorter brake hangs from the same line as the accelerator. */
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 0 1rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+/* Once the engine-curve chart has scrolled up out of view there is nothing left
+   on screen the speed drives, so the pedals fold away. */
+.pedals.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Back in the flow beside the results on wide screens, the slider is in reach
+   and the pedals are just clutter. */
+@media (min-width: 56.25rem) {
+  .pedals { display: none; }
+}
+
+/* Keep the last section clear of the floating pedals while they are shown. */
+@media (max-width: 56.24rem) {
+  #app { padding-bottom: 7rem; }
+}
+
+.pedal {
+  pointer-events: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: none; /* a press holds to ramp, never scrolls or selects */
+  -webkit-tap-highlight-color: transparent;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.3));
+  transition: transform 0.08s ease;
+}
+
+/* The brake is the wide trapezoid plate; the accelerator is the tall footrest
+   with the narrowed foot, taller than the brake but slim, so the two sit like
+   a real footwell. */
+.pedal-brake svg { display: block; height: 3.23rem; width: auto; }
+.pedal-accel svg { display: block; height: 5.7rem; width: auto; }
+
+.pedal:active { transform: translateY(2px) scale(0.96); }
+
+.pedal { --pedal-face: var(--panel); }
+:root[data-theme="dark"] .pedal { --pedal-face: #000000; }
+.pedal-body { fill: var(--pedal-face); stroke: var(--muted); stroke-width: 3; stroke-linejoin: round; }
+
+/* In the dark cabin the pedals dim with the rest of the dash — strokes a step
+   darker than --muted. */
+:root[data-theme="dark"] .pedal-body,
+:root[data-theme="dark"] .pedal-grip line { stroke: #7d8794; }
+.pedal-grip line { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
+.pedal-accel .pedal-grip line { stroke-width: 3.4; }
+
+/* Light up while held, each pedal in its own colour: the slots take the full
+   accent and the face picks up a faint wash of it, so a press reads even under
+   the thumb that is covering the slots. */
+.pedal-accel:active .pedal-grip line { stroke: var(--dial-amber); }
+.pedal-brake:active .pedal-grip line { stroke: var(--needle); }
+.pedal-accel:active .pedal-body { fill: color-mix(in srgb, var(--dial-amber) 35%, var(--pedal-face)); }
+.pedal-brake:active .pedal-body { fill: color-mix(in srgb, var(--needle) 35%, var(--pedal-face)); }

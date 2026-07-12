@@ -72,9 +72,9 @@
       <!-- The label sits inside the track and names the value the bar sets;
            redraw() keeps #speed-hint-val in step as you drag. -->
       <div class="topbar-speed">
-        <input type="range" id="cur_speed" min="0" max="277" step="1" value="100"
+        <input type="range" id="cur_speed" min="0" max="277" step="1" value="5"
                aria-label="Target speed" />
-        <span class="speed-hint" aria-hidden="true">Target&nbsp;Speed:&nbsp;<span id="speed-hint-val">100</span>&nbsp;<span class="unit" data-speed-unit>km/h</span></span>
+        <span class="speed-hint" aria-hidden="true">Target&nbsp;Speed:&nbsp;<span id="speed-hint-val">5</span>&nbsp;<span class="unit" data-speed-unit>km/h</span></span>
       </div>
 
       <!-- A BMW headlight-switch for the page theme, sized as a big touch target:
@@ -325,6 +325,48 @@
         </div>
       </div>
     </section>
+
+    <!-- Phone-only floating pedals (hidden by CSS on wide screens). Press and
+         hold to drive the speed slider: the accelerator on the right ramps it
+         up, the brake on the left brings it down — a footwell for the reader who
+         is scrolling charts and can't reach the slider pinned up top. -->
+    <div class="pedals" aria-hidden="false">
+      <!-- Brake: an AC Schnitzer-style aluminium plate. Top and bottom edges
+           horizontal, the left side vertical, and the right side leaning at
+           the same slant as the accelerator's sides. The grip slots run
+           near-vertical at the accelerator's slot angle so the pair reads as
+           a set. Broader than the accelerator, but much shorter. -->
+      <button type="button" id="pedal-brake" class="pedal pedal-brake"
+              aria-label="Brake — decrease speed">
+        <svg viewBox="0 0 104 96" aria-hidden="true">
+          <path class="pedal-body" d="M 30 4 L 86 4 Q 98 4 96.5 15.9
+            L 88.8 76.1 Q 87.25 88 75.25 88 L 30 88 Q 18 88 18 76
+            L 18 16 Q 18 4 30 4 Z" />
+          <g class="pedal-grip">
+            <line x1="40.9" y1="18" x2="33.7" y2="74" />
+            <line x1="58.9" y1="18" x2="51.7" y2="74" />
+            <line x1="76.9" y1="18" x2="69.7" y2="74" />
+          </g>
+        </svg>
+      </button>
+      <!-- Accelerator: the long AC Schnitzer footrest plate — a parallelogram.
+           Top and bottom edges horizontal, both sides sharing the same slant,
+           leaning left as they drop. Long continuous grip slots run the full
+           face at that same slant, so slots and edges all stay parallel.
+           Taller than the brake but slim. -->
+      <button type="button" id="pedal-accel" class="pedal pedal-accel"
+              aria-label="Accelerator — increase speed">
+        <svg viewBox="0 0 80 180" aria-hidden="true">
+          <path class="pedal-body" d="M 33 6 L 69 6 Q 74 6 73.35 11
+            L 53.15 169 Q 52.5 174 47.5 174 L 11.5 174 Q 6.5 174 7.15 169
+            L 27.4 11 Q 28 6 33 6 Z" />
+          <g class="pedal-grip">
+            <line x1="39.1" y1="24" x2="22.2" y2="156" />
+            <line x1="58.3" y1="24" x2="41.4" y2="156" />
+          </g>
+        </svg>
+      </button>
+    </div>
   </main>
 
   <!-- Cloned once per setup. Ids are rewritten with the setup key on clone, so
@@ -369,7 +411,7 @@
 
     <div class="field">
       <label for="shift_time">Shift dead time <span class="unit">s</span></label>
-      <input type="number" id="shift_time" data-field="shift_time" value="0.3"
+      <input type="number" id="shift_time" data-field="shift_time" value="0.2"
              min="0" max="5" step="0.05" />
     </div>
 

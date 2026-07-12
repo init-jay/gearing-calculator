@@ -34,6 +34,7 @@ let pyConvertCurve = null;
 let pyConvertWeight = null;
 let pyParseRacechrono = null;
 let pyGearsAtSpeeds = null;
+let pyAccelProfile = null;
 
 /** Latest Python result per active setup key, e.g. `{a: {...}, b: {...}}`. */
 let results = {};
@@ -1754,12 +1755,14 @@ function callPyArgs(fn, ...args) {
 /** Recompute every active setup's gear curves via Python, then redraw. */
 function recompute() {
   const next = {};
+  const inputsByKey = {};
   for (const key of activeKeys()) {
     const root = setupRoot(key);
     updateTireDiameter(root);
     updatePowerCells(root);
     const inputs = readInputs(root);
     if (inputs.gears.length === 0) return; // mid-edit; keep the last good result
+    inputsByKey[key] = inputs;
 
     // Advertise the ceiling, but don't rewrite the value here: `recompute` runs on
     // every keystroke, and a half-typed redline ("8" of "8000") would clobber it.
@@ -1776,6 +1779,10 @@ function recompute() {
   const slider = $("#cur_speed");
   slider.max = String(Math.floor(topSpeed()));
   if (parseFloat(slider.value) > topSpeed()) slider.value = slider.max;
+
+  // The accelerator pedal ramps the speed along the fastest setup's real
+  // standing-start curve, so holding it tracks that setup's 0-100 time.
+  updateAccelProfile(inputsByKey);
 
   // Table headers carry their own units, built from the result; this is the
   // slider's label, which is not.
@@ -2059,6 +2066,121 @@ function initSpeedScrub() {
   slider.addEventListener("touchmove", onTouch, { passive: false });
 }
 
+/** Fastest active setup's standing-start speed-vs-time curve, or null when it
+ *  has no torque curve to run. Refreshed by `updateAccelProfile` on recompute. */
+let accelProfile = null;
+
+// Seconds for the brake to bleed off the whole speed range, and for the fallback
+// accelerator ramp when a setup has no torque curve (so no real 0-100 to follow).
+// Braking is quicker than accelerating, as in a real car, but not a hard stop.
+const BRAKE_SECONDS = 4;
+const ACCEL_FALLBACK_SECONDS = 7;
+
+/** Recompute the accelerator's reference curve from the quickest active setup. */
+function updateAccelProfile(inputsByKey) {
+  accelProfile = null;
+  // "Faster" = the quicker 0-100 (smaller acceleration time); its own top speed is
+  // the run's target, so the pedal follows that setup's curve to where it tops out.
+  const timed = Object.keys(inputsByKey).filter((k) => results[k]?.acceleration?.time != null);
+  if (timed.length === 0) return; // no timed run (no torque curve) — pedal falls back
+  const pick = timed.reduce((a, b) =>
+    results[b].acceleration.time < results[a].acceleration.time ? b : a);
+  const target = Math.floor(results[pick].max_speed);
+  if (target > 0) accelProfile = callPy(pyAccelProfile, inputsByKey[pick], target);
+}
+
+/** Interpolate a monotonic table `ys` sampled against monotonic `xs` at `x`. */
+function interp(xs, ys, x) {
+  const n = xs.length;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[n - 1]) return ys[n - 1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] <= x) lo = mid; else hi = mid;
+  }
+  const span = xs[hi] - xs[lo];
+  return ys[lo] + (span ? (x - xs[lo]) / span * (ys[hi] - ys[lo]) : 0);
+}
+
+/**
+ * The phone-only pedals: press and hold to drive the speed slider. The
+ * accelerator advances along the fastest setup's real acceleration curve in
+ * wall-clock time — hold it for that setup's 0-100 and you reach 100 — by
+ * tracking the run's virtual clock and reading the speed back off it each frame.
+ * The brake bleeds speed off at a steady rate. A float speed is kept internally
+ * so sub-1-unit progress isn't lost to the slider's integer rounding.
+ */
+function initPedals() {
+  const slider = $("#cur_speed");
+  let held = 0;      // +1 accelerator, -1 brake, 0 released
+  let raf = null;
+  let last = 0;
+  let vt = 0;        // virtual seconds into the accel run (accelerator only)
+  let speed = 0;     // internal float speed, mirrored to the slider each frame
+
+  const timeForSpeed = (v) => interp(accelProfile.speed, accelProfile.time, v);
+  const speedForTime = (t) => interp(accelProfile.time, accelProfile.speed, t);
+
+  const frame = (now) => {
+    if (!held) { raf = null; return; }
+    const dt = Math.min(0.05, (now - last) / 1000); // clamp stalls (tab switch)
+    last = now;
+    const max = parseFloat(slider.max) || 1;
+
+    if (held > 0) {
+      if (accelProfile) { vt += dt; speed = speedForTime(vt); }
+      else speed += (max / ACCEL_FALLBACK_SECONDS) * dt; // no curve: linear ramp
+    } else {
+      speed -= (max / BRAKE_SECONDS) * dt;
+    }
+    speed = Math.max(0, Math.min(max, speed));
+
+    const rounded = String(Math.round(speed));
+    if (rounded !== slider.value) {
+      slider.value = rounded;
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    raf = requestAnimationFrame(frame);
+  };
+
+  const start = (dir) => {
+    held = dir;
+    speed = parseFloat(slider.value) || 0;
+    // Seed the virtual clock from where the slider already sits, so a hold picks
+    // up the run at the current speed rather than restarting from rest.
+    if (dir > 0 && accelProfile) vt = timeForSpeed(speed);
+    last = performance.now();
+    if (!raf) raf = requestAnimationFrame(frame);
+  };
+  const stop = () => { held = 0; };
+
+  for (const [id, dir] of [["pedal-accel", 1], ["pedal-brake", -1]]) {
+    const el = $(`#${id}`);
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      start(dir);
+    });
+    el.addEventListener("pointerup", stop);
+    el.addEventListener("pointercancel", stop);
+    el.addEventListener("lostpointercapture", stop);
+  }
+
+  // Fold the pedals away once the engine-curve chart has scrolled up past the
+  // top of the viewport: everything the speed drives (gauges, traces) is above
+  // it, so below there is nothing left to steer.
+  const pedals = $(".pedals");
+  const anchor = $("#engine-chart");
+  if (anchor && "IntersectionObserver" in window) {
+    new IntersectionObserver(([e]) => {
+      const scrolledPast = !e.isIntersecting && e.boundingClientRect.top < 0;
+      pedals.classList.toggle("is-hidden", scrolledPast);
+      if (scrolledPast) stop(); // don't leave a held pedal ramping while hidden
+    }, { threshold: 0 }).observe(anchor);
+  }
+}
+
 function wireEvents() {
   // Delegated: both setup forms are cloned at boot and their gear rows are rebuilt
   // whenever a gear is added or removed, so nothing can hold a direct listener.
@@ -2135,6 +2257,7 @@ function wireEvents() {
   // Only moves the needles/markers along the traces; the curves are unchanged.
   $("#cur_speed").addEventListener("input", redraw);
   initSpeedScrub();
+  initPedals();
 
   initLapMap();
   initInputsDrawer();
@@ -2166,6 +2289,7 @@ async function main() {
   pyodide.runPython(lapmapSrc);
   pyParseRacechrono = pyodide.globals.get("parse_racechrono");
   pyGearsAtSpeeds = pyodide.globals.get("gears_at_speeds");
+  pyAccelProfile = pyodide.globals.get("accel_profile");
 
   // A fresh setup is the first preset of each, so `presets.json` holds the
   // defaults rather than a second copy of them living here.

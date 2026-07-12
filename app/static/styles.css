@@ -206,6 +206,13 @@ main {
   color: var(--muted);
 }
 
+/* Phone: every rem above the gauges is a rem of dials pushed off screen —
+   the blurb goes, the h1 alone carries the masthead. */
+@media (max-width: 56.24rem) {
+  .subtitle { display: none; }
+  .page-header h1 { margin-bottom: 0.75rem; }
+}
+
 /* Phone-first: one column, with the inputs in the hamburger drawer. Wide
    screens (the old two-column threshold) put the inputs panel back in the
    flow beside the results — the drawer chrome only exists below it. */
@@ -466,6 +473,20 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
+}
+
+/* The gauge cluster is header enough for the results panel: its "Results"
+   h2 paints nothing (and costs no vertical space), but stays in the DOM as
+   the section's accessible name via aria-labelledby. */
+#results-heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .panel h3 {
@@ -754,6 +775,45 @@ fieldset.units label {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
+}
+
+/* Phone: the cluster pins just under the topbar while the charts scroll past,
+   and lets go where its .dash wrapper ends — at the Optimal shift points
+   table (sticky releases at its container's bottom edge; #cross-section sits
+   outside .dash for exactly this reason). --topbar-h is kept current by a
+   ResizeObserver in app.js.
+
+   Drawn as an instrument pod, not a full-width strip: a binnacle silhouette —
+   hooded top corners, tighter at the bottom — floating just clear of the bar
+   on its own darker face, the page scrolling by beneath and around it. */
+@media (max-width: 56.24rem) {
+  .gauges {
+    position: sticky;
+    top: calc(var(--topbar-h, 3.5rem) + 0.35rem);
+    z-index: 3; /* over the charts, under the pedals (4) and topbar (5) */
+    /* Mixing a touch of --text into the panel moves the face toward contrast
+       in both themes: a shade darker than the page in light, a shade lighter
+       in dark — so the black dial faces still read against the pod. */
+    --pod-face: color-mix(in srgb, var(--text) 6%, var(--panel));
+    padding: 1.9rem 0.85rem 0.55rem;
+    background: var(--pod-face);
+    border: 1px solid var(--border);
+    /* Elliptical top radii spanning half the width each make the whole top
+       edge one continuous arch over both dials — a single rainbow hood, not
+       a rectangle and not a per-dial double binnacle. */
+    border-radius: 50% 50% 1.1rem 1.1rem / 5.2rem 5.2rem 1.1rem 1.1rem;
+    box-shadow: 0 0.6rem 1.2rem -0.7rem rgba(0, 0, 0, 0.55);
+  }
+  /* Dark cabin: nearly black — full black swallowed the dial faces, so keep
+     just enough panel tint that the pod stays a surface. */
+  :root[data-theme="dark"] .gauges {
+    --pod-face: color-mix(in srgb, #000000 70%, var(--panel));
+  }
+  /* bottom: 0 is the padding-box edge; lift the gear box by the pod's bottom
+     padding so it sits back on the dials' flat bottom line. (Scoped under
+     .gauges to outrank the base .gear-cluster rule, which is declared later
+     in the file and would otherwise win the tie.) */
+  .gauges .gear-cluster { bottom: 0.55rem; }
 }
 
 /* Lifted out of the grid so it costs the dials no width. The dials are circles

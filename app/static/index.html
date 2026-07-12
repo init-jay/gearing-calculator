@@ -170,6 +170,10 @@
       <section class="panel results" aria-labelledby="results-heading">
         <h2 id="results-heading">Results</h2>
 
+        <!-- Sticky scope: on phones the gauge cluster pins under the topbar
+             while the charts inside this wrapper scroll by, and lets go when
+             the wrapper ends — right at the Optimal shift points table. -->
+        <div class="dash">
         <div class="gauges">
           <!-- viewBox height 180 (not 200) crops the empty arc below the lowest
                ticks, giving the dial a flat bottom like a real cluster and
@@ -223,7 +227,12 @@
                  aria-label="Engine torque and power versus RPM"></svg>
             <div id="engine-peaks" class="legend"></div>
           </details>
+        </div>
+        </div>
 
+        <!-- Outside the sticky .dash scope (so the pinned gauges release here),
+             but engine-dependent like #effort-section: hidden alongside it. -->
+        <div id="cross-section">
           <h3>Optimal shift points</h3>
           <p class="hint">
             Where the next gear starts pushing harder than the one you are in.

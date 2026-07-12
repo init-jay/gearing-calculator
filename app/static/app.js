@@ -1873,6 +1873,7 @@ function redraw() {
   // frame — and require *every* setup to have one, since the charts overlay them.
   const hasEngine = series.every((s) => s.result.efforts.length > 0);
   $("#effort-section").hidden = !hasEngine;
+  $("#cross-section").hidden = !hasEngine;
   if (hasEngine) {
     renderEffortChart($("#effort-chart"), series, speed);
     renderEffortLegend($("#effort-legend"), series);
@@ -2265,6 +2266,16 @@ function wireEvents() {
   $("#cur_speed").addEventListener("input", redraw);
   initSpeedScrub();
   initPedals();
+
+  // The gauge cluster pins under the sticky topbar on phones (see .gauges in
+  // styles.css); its offset has to track the bar's real height, which changes
+  // as the bar's flex row wraps at different widths.
+  if ("ResizeObserver" in window) {
+    new ResizeObserver(([e]) => {
+      document.documentElement.style.setProperty(
+        "--topbar-h", `${e.target.offsetHeight}px`);
+    }).observe($(".topbar"));
+  }
 
   initLapMap();
   initInputsDrawer();

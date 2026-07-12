@@ -807,7 +807,7 @@ fieldset.units label {
   /* Daylight pod: the same near-black amber as the gear readout's phosphor
      tile, so pod and LCD read as one material — and still darker than the
      dial faces' gradient edge, so the dials lift out of it. */
-  --pod-face: #15100a;
+  --pod-face: #d8dbe0;
   /* Chrome kept lean: just enough hood over the dials for the arch to
      clear their rings, so the pod spends its pixels on gauges, not face. */
   padding: 8.5cqw 3.5cqw 2.5cqw;

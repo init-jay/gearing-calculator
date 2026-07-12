@@ -25,9 +25,9 @@
      palette; dark mode swaps the whole set for the BMW E46 night-backlight look
      (the second dark-mode block below) — the one place the dial colours follow
      the scheme, on purpose. Keep both sets deliberate. */
-  /* E46 M3 daytime cluster: gunmetal-gray faces in a charcoal pod. */
-  --dial-face: #5d6267;
-  --dial-face-edge: #4a4f54;
+  /* E46 M3 daytime cluster: near-black faces in a charcoal pod. */
+  --dial-face: #282b2f;
+  --dial-face-edge: #1b1d20;
   --dial-bezel: #c8cfd6; /* bright silver chrome ring */
   --dial-ink: #f2f4f6;
   --dial-ink-dim: #aeb4bb;
@@ -97,9 +97,11 @@
   filter: drop-shadow(0 0 0px var(--dial-blue)) drop-shadow(0 0 2px var(--dial-blue));
 }
 
-/* The gear number sits among the dials, so it glows with them. */
-:root[data-theme="dark"] .gear-a { text-shadow: 0 0 0.5cqw var(--dial-glow); }
-:root[data-theme="dark"] .gear-b { text-shadow: 0 0 0.5cqw var(--dial-blue); }
+/* The gear readout keeps its amber LCD ink in both themes, but only glows
+   at night with the rest of the backlighting. drop-shadow, not text-shadow:
+   the glyphs are dot-matrix SVGs, not text. */
+:root[data-theme="dark"] .gear-a { filter: drop-shadow(0 0 0.5cqw #ffab2e); }
+:root[data-theme="dark"] .gear-b { filter: drop-shadow(0 0 0.5cqw var(--dial-blue)); }
 
 * { box-sizing: border-box; }
 
@@ -802,8 +804,10 @@ fieldset.units label {
   container-type: inline-size;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  /* Daylight pod: E46 charcoal shell around the gunmetal dial faces. */
-  --pod-face: #2d3033;
+  /* Daylight pod: the same near-black amber as the gear readout's phosphor
+     tile, so pod and LCD read as one material — and still darker than the
+     dial faces' gradient edge, so the dials lift out of it. */
+  --pod-face: #15100a;
   /* Chrome kept lean: just enough hood over the dials for the arch to
      clear their rings, so the pod spends its pixels on gauges, not face. */
   padding: 8.5cqw 3.5cqw 2.5cqw;
@@ -899,17 +903,23 @@ fieldset.units label {
   min-width: 2.8em;
   padding: 0.45cqw 1cqw;
   /* Same instrument rim as the dials: gray bezel border over the dark
-     black LCD tile; no chrome — the rings stay the dials' jewellery. */
-  background: #000000;
+     amber-black LCD tile, like the unlit phosphor of an old dot-matrix
+     display; no chrome — the rings stay the dials' jewellery. */
+  background: #110a02;
   border: 2px solid transparent;
   border-radius: 0.8cqw;
-  /* Smaller than before so it does not overpower the dials. */
-  font-family: "Oswald", system-ui, sans-serif;
-  font-size: 2.5cqw;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  /* font-size still sets the scale: each dot-matrix glyph is 1em tall. */
+  font-size: 3.1cqw;
   line-height: 1.1;
 }
+
+/* The readout is dot-matrix SVG glyphs (built by dotMatrix in app.js), not
+   font glyphs: 5x9 dots, 1em tall, lit dots in the span's currentColor over
+   the faint unlit grid — an old odometer LCD. */
+.gear-cluster span { display: inline-flex; align-items: center; gap: 0.14em; }
+.dot-char { height: 1em; width: auto; aspect-ratio: 50 / 90; display: block; }
+.dot-char .dot-on { fill: currentColor; }
+.dot-char .dot-off { fill: currentColor; opacity: 0.13; }
 
 /* At night the chrome disappears: no dial rims, no white seam, no box around
    the gear readout — only the lit marks and the floating gear number remain. */
@@ -922,10 +932,11 @@ fieldset.units label {
 
 /* Colour tracks the tach needle: white with a lone (single-setup) needle,
    amber once comparison splits it into A's needle. */
-.gear-a { color: var(--dial-ink); }
-.gauges[data-compare] .gear-a { color: var(--dial-amber); }
+/* Fixed LCD colours, not palette vars: the readout is backlit amber in both
+   themes (matching the dark palette's ink), B keeping its blue. */
+.gear-a { color: #ffa724; }
 .gear-b { color: var(--dial-blue); }
-.gear-sep { color: var(--dial-ink-dim); padding: 0 0.12em; }
+.gear-sep { color: #b8781a; padding: 0 0.12em; }
 
 .gauge { width: 100%; height: auto; }
 
@@ -1384,7 +1395,7 @@ tbody td.is-current { background: var(--accent-soft); }
 
 .pedal:active { transform: translateY(2px) scale(0.96); }
 
-.pedal { --pedal-face: #2d3033; } /* same shell tone as the daylight pod */
+.pedal { --pedal-face: #15100a; } /* same shell tone as the daylight pod */
 /* No outline — the plate is just its face, the slots in the dials' marker
    ink so the pedals read as part of the instrument set. */
 .pedal-body { fill: var(--pedal-face); }

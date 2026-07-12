@@ -169,6 +169,54 @@ function needlePolygon(cls, cx, cy, angleDeg) {
   });
 }
 
+/* 5x9 dot-matrix glyphs for the gear readout, drawn seven-segment style —
+   each digit is built from the classic segments (top/middle/bottom rows,
+   corner-free, and edge columns three dots tall for the verticals), so it
+   reads like an LCD odometer digit rendered in dots. Each row is a 5-bit
+   strip, MSB leftmost. */
+const DOT_GLYPHS = {
+  "0": [0b01110, 0b10001, 0b10001, 0b10001, 0b00000, 0b10001, 0b10001, 0b10001, 0b01110],
+  "1": [0b00000, 0b00001, 0b00001, 0b00001, 0b00000, 0b00001, 0b00001, 0b00001, 0b00000],
+  "2": [0b01110, 0b00001, 0b00001, 0b00001, 0b01110, 0b10000, 0b10000, 0b10000, 0b01110],
+  "3": [0b01110, 0b00001, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b00001, 0b01110],
+  "4": [0b00000, 0b10001, 0b10001, 0b10001, 0b01110, 0b00001, 0b00001, 0b00001, 0b00000],
+  "5": [0b01110, 0b10000, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b00001, 0b01110],
+  "6": [0b01110, 0b10000, 0b10000, 0b10000, 0b01110, 0b10001, 0b10001, 0b10001, 0b01110],
+  "7": [0b01110, 0b00001, 0b00001, 0b00001, 0b00000, 0b00001, 0b00001, 0b00001, 0b00000],
+  "8": [0b01110, 0b10001, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b10001, 0b01110],
+  "9": [0b01110, 0b10001, 0b10001, 0b10001, 0b01110, 0b00001, 0b00001, 0b00001, 0b01110],
+  "/": [0b00001, 0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000, 0b10000],
+};
+
+/**
+ * Render `str` into `el` as dot-matrix characters: one svg per glyph, a lit
+ * dot per set bit plus the full grid of faint unlit dots behind, like an old
+ * LCD readout. Dots fill with currentColor, so the existing .gear-a/.gear-b
+ * colour (and glow) rules keep working. No-ops when `str` is unchanged —
+ * this runs inside redraw(), which fires every frame under a held pedal.
+ */
+function dotMatrix(el, str) {
+  if (el.dataset.dots === str) return;
+  el.dataset.dots = str;
+  el.replaceChildren();
+  for (const ch of str) {
+    const rows = DOT_GLYPHS[ch];
+    if (!rows) continue;
+    const svg = svgEl("svg", { class: "dot-char",
+                               viewBox: `0 0 50 ${rows.length * 10}` });
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < 5; c++) {
+        const lit = (rows[r] >> (4 - c)) & 1;
+        svg.append(svgEl("circle", {
+          class: lit ? "dot-on" : "dot-off",
+          cx: c * 10 + 5, cy: r * 10 + 5, r: 4.6,
+        }));
+      }
+    }
+    el.append(svg);
+  }
+}
+
 /**
  * Draw a round instrument dial: dark face, tick ring, numerals, tapered needles,
  * and `legend` printed below the hub. Like the real cluster it carries no digital
@@ -1858,12 +1906,14 @@ function redraw() {
     thousands: false, // a speedo reads whole km/h, never "×1000"
   });
 
-  // The gear each setup holds at this speed, in the cluster between the dials.
+  // The gear each setup holds at this speed, in the cluster between the dials,
+  // drawn as a dot-matrix readout like the cluster's odometer LCD.
   // RPM is no longer shown digitally — it is read off the tach face.
   for (const s of series) {
     const out = s.key === "a" ? $("#cur_gear") : $(`#cur_gear_${s.key}`);
-    out.textContent = String(s.at.gear);
+    dotMatrix(out, String(s.at.gear));
   }
+  dotMatrix($(".gear-sep"), "/");
 
   renderSpread($("#spread"), series);
   renderChart($("#chart"), series, speed);

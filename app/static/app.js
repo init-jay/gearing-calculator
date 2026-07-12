@@ -209,6 +209,9 @@ function renderGauge(svg, { needles, max, step, legend, redlineAt = null, thousa
     const dx = Math.sqrt(r * r - (GAUGE_FLAT_Y - cy) ** 2);
     return `M ${cx - dx} ${GAUGE_FLAT_Y} A ${r} ${r} 0 1 1 ${cx + dx} ${GAUGE_FLAT_Y} Z`;
   };
+  // The surround fills the sliver between the face edge (R_FACE) and the
+  // bezel ring (R_BEZEL), so the pod never shows through the seam.
+  svg.append(svgEl("path", { class: "gauge-surround", d: flatDisk(R_BEZEL) }));
   svg.append(svgEl("path", { d: flatDisk(R_FACE), fill: `url(#${faceId})` }));
   svg.append(svgEl("path", { class: "gauge-bezel", d: flatDisk(R_BEZEL) }));
 

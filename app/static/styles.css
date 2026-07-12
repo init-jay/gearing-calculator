@@ -25,9 +25,10 @@
      palette; dark mode swaps the whole set for the BMW E46 night-backlight look
      (the second dark-mode block below) — the one place the dial colours follow
      the scheme, on purpose. Keep both sets deliberate. */
-  --dial-face: #1a1d21;
-  --dial-face-edge: #050607;
-  --dial-bezel: #3d434a;
+  /* E46 M3 daytime cluster: gunmetal-gray faces in a charcoal pod. */
+  --dial-face: #5d6267;
+  --dial-face-edge: #4a4f54;
+  --dial-bezel: #c8cfd6; /* bright silver chrome ring */
   --dial-ink: #f2f4f6;
   --dial-ink-dim: #aeb4bb;
   --dial-red: #d3232b;
@@ -209,10 +210,22 @@ main {
 }
 
 /* Phone: every rem above the gauges is a rem of dials pushed off screen —
-   the blurb goes, the h1 alone carries the masthead. */
+   the blurb goes, and the h1 shrinks to the topbar's Target Speed size so
+   the masthead is a label, not a banner. */
 @media (max-width: 56.24rem) {
   .subtitle { display: none; }
-  .page-header h1 { margin-bottom: 0.75rem; }
+  .page-header h1 {
+    margin-bottom: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  /* Compress the masthead: trim the page's top padding, slim the bar, and
+     sit the content card flush against it. */
+  main { padding-top: 0.75rem; }
+  .topbar {
+    margin-bottom: 0;
+    padding-block: 0.5rem;
+  }
 }
 
 /* Phone-first: one column, with the inputs in the hamburger drawer. Wide
@@ -248,11 +261,7 @@ main {
      with the panels below while its background runs edge to edge. */
   padding: 0.75rem max(1rem, 50vw - 37rem);
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
 }
-
-/* Night cabin: the bar's divider joins the borderless look. */
-:root[data-theme="dark"] .topbar { border-bottom-color: transparent; }
 
 .topbar-speed {
   position: relative; /* anchors the hint overlaid inside the track */
@@ -315,17 +324,12 @@ main {
   font-weight: 600;
   color: var(--text);
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid transparent; /* frameless like the cards */
   border-radius: 8px;
   cursor: pointer;
 }
 
-/* Like the cards, the Inputs button loses its outline at night — but hover
-   still lights the accent ring (the dark rule outranks a bare :hover, so the
-   dark hover needs restating). */
-:root[data-theme="dark"] .hamburger { border-color: transparent; }
 .hamburger:hover { border-color: var(--accent); }
-:root[data-theme="dark"] .hamburger:hover { border-color: var(--accent); }
 .hamburger svg { display: block; }
 .hamburger svg path { fill: currentColor; }
 /* Phone-first: an icon-only button, so it stays narrow and the theme switch
@@ -472,15 +476,13 @@ main {
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--border);
+  /* Frameless in both themes: the cards read as content islands. The border
+     is kept transparent, not removed, so nothing shifts if a panel variant
+     ever colours it back in. */
+  border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 1.25rem;
 }
-
-/* Night cabin: the cards dissolve into the black page — no outlines, just
-   content islands. (Border kept transparent, not removed, so nothing shifts
-   by a pixel when the theme flips.) */
-:root[data-theme="dark"] .panel { border-color: transparent; }
 
 .panel h2 {
   margin: 0 0 1rem;
@@ -784,61 +786,75 @@ fieldset.units label {
 }
 
 /* -------------------------------- gauges -------------------------------- */
+/* The gauges live inside an instrument pod at every width: a binnacle
+   silhouette — a single arched hood over both dials, tighter corners at the
+   bottom — on its own charcoal face.
+
+   The pod's chrome is sized in cqw against the .dash wrapper (the .gauges'
+   own inline-size container would only serve descendants), so pod and dials
+   scale together as one drawing: the proportions are locked to how the
+   cluster looks at the minimum 320px page width (1cqw = 2.48px there),
+   instead of rem chrome staying fixed while the dials grow. */
+.dash { container-type: inline-size; }
 .gauges {
   position: relative;
+  z-index: 0; /* stacking context, so the z:-1 pod face stays inside it */
   container-type: inline-size;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+  /* Daylight pod: E46 charcoal shell around the gunmetal dial faces. */
+  --pod-face: #2d3033;
+  /* Chrome kept lean: just enough hood over the dials for the arch to
+     clear their rings, so the pod spends its pixels on gauges, not face. */
+  padding: 8.5cqw 3.5cqw 2.5cqw;
+  gap: 2.4cqw;
 }
+/* The pod face lives on a pseudo rather than the element's own background:
+   negative-z children paint *over* their parent's background, so an
+   element-background pod could never sit above the ::before scrim used on
+   phones. As a z:-1 sibling of the z:-2 scrim it stacks correctly: scrim,
+   face, dials. */
+.gauges::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--pod-face);
+  border: 1px solid var(--border);
+  /* Elliptical top radii spanning half the width each make the whole top
+     edge one continuous arch over both dials — a single rainbow hood, not
+     a rectangle and not a per-dial double binnacle. (Pseudo-element cqw
+     resolves against .gauges itself, whose content box is 93cqw of .dash,
+     hence these values are the .dash-relative ones divided by 0.93.) */
+  border-radius: 50% 50% 7.6cqw 7.6cqw / 28cqw 28cqw 7.6cqw 7.6cqw;
+  box-shadow: 0 0.6rem 1.2rem -0.7rem rgba(0, 0, 0, 0.55);
+}
+/* Dark cabin: black like the cards, bezel included — the pod is an
+   invisible surface; only its drop shadow and the lit dials give it away. */
+:root[data-theme="dark"] .gauges {
+  --pod-face: #000000;
+}
+:root[data-theme="dark"] .gauges::after {
+  border-color: #000000;
+}
+/* bottom: 0 is the padding-box edge; lift the gear box by the pod's bottom
+   padding so it sits back on the dials' flat bottom line. (Scoped under
+   .gauges to outrank the base .gear-cluster rule, which is declared later
+   in the file and would otherwise win the tie.) NB: this cqw resolves
+   against .gauges itself (the nearest container for its descendants), whose
+   content box is 100 - 2*3.5 = 93cqw of .dash: 2.5/0.93 = 2.7. */
+.gauges .gear-cluster { bottom: 2.7cqw; }
 
-/* Phone: the cluster pins just under the topbar while the charts scroll past,
-   and lets go where its .dash wrapper ends — at the Optimal shift points
-   table (sticky releases at its container's bottom edge; #cross-section sits
-   outside .dash for exactly this reason). --topbar-h is kept current by a
-   ResizeObserver in app.js.
-
-   Drawn as an instrument pod, not a full-width strip: a binnacle silhouette —
-   hooded top corners, tighter at the bottom — floating just clear of the bar
-   on its own darker face, the page scrolling by beneath and around it. */
+/* Phone-only behaviour: the cluster pins just under the topbar while the
+   charts scroll past, and lets go where its .dash wrapper ends — at the
+   Optimal shift points table (sticky releases at its container's bottom
+   edge; #cross-section sits outside .dash for exactly this reason).
+   --topbar-h is kept current by a ResizeObserver in app.js. */
 @media (max-width: 56.24rem) {
-  /* The pod's chrome is sized in cqw against the .dash wrapper (its own
-     inline-size container would only serve descendants), so pod and dials
-     scale together as one drawing: the proportions are locked to how the
-     cluster looks at the minimum 320px page width (1cqw = 2.48px there),
-     instead of rem chrome staying fixed while the dials grow. */
-  .dash { container-type: inline-size; }
   .gauges {
     position: sticky;
     top: calc(var(--topbar-h, 3.5rem) + 0.35rem);
     z-index: 3; /* over the charts, under the pedals (4) and topbar (5) */
-    /* Mixing a touch of --text into the panel moves the face toward contrast
-       in both themes: a shade darker than the page in light, a shade lighter
-       in dark — so the black dial faces still read against the pod. */
-    --pod-face: color-mix(in srgb, var(--text) 13%, var(--panel));
-    /* Chrome kept lean: just enough hood over the dials for the arch to
-       clear their rings, so the pod spends its pixels on gauges, not face. */
-    padding: 8.5cqw 3.5cqw 2.5cqw;
-    gap: 2.4cqw;
-  }
-  /* The pod face lives on a pseudo rather than the element's own background:
-     negative-z children paint *over* their parent's background, so an
-     element-background pod could never sit above the ::before scrim. As a
-     z:-1 sibling of the z:-2 scrim it stacks correctly: scrim, face, dials. */
-  .gauges::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background: var(--pod-face);
-    border: 1px solid var(--border);
-    /* Elliptical top radii spanning half the width each make the whole top
-       edge one continuous arch over both dials — a single rainbow hood, not
-       a rectangle and not a per-dial double binnacle. (Pseudo-element cqw
-       resolves against .gauges itself, whose content box is 93cqw of .dash,
-       hence these values are the .dash-relative ones divided by 0.93.) */
-    border-radius: 50% 50% 7.6cqw 7.6cqw / 28cqw 28cqw 7.6cqw 7.6cqw;
-    box-shadow: 0 0.6rem 1.2rem -0.7rem rgba(0, 0, 0, 0.55);
   }
   /* Content sliding under the pod must not pop back out above it or peek
      around the arch's shoulders — that reads as the pod floating loose.
@@ -858,21 +874,6 @@ fieldset.units label {
     background: var(--panel);
     pointer-events: none;
   }
-  /* Dark cabin: black like the cards, bezel included — the pod is an
-     invisible surface; only its drop shadow and the lit dials give it away. */
-  :root[data-theme="dark"] .gauges {
-    --pod-face: #000000;
-  }
-  :root[data-theme="dark"] .gauges::after {
-    border-color: #000000;
-  }
-  /* bottom: 0 is the padding-box edge; lift the gear box by the pod's bottom
-     padding so it sits back on the dials' flat bottom line. (Scoped under
-     .gauges to outrank the base .gear-cluster rule, which is declared later
-     in the file and would otherwise win the tie.) NB: this cqw resolves
-     against .gauges itself (the nearest container for its descendants), whose
-     content box is 100 - 2*3.5 = 93cqw of .dash: 2.5/0.93 = 2.7. */
-  .gauges .gear-cluster { bottom: 2.7cqw; }
 }
 
 /* Lifted out of the grid so it costs the dials no width. The dials are circles
@@ -898,9 +899,9 @@ fieldset.units label {
   min-width: 2.8em;
   padding: 0.45cqw 1cqw;
   /* Same instrument rim as the dials: gray bezel border over the dark
-     face-edge fill — the box's two tones as the gauges' bezel + face-edge. */
-  background: var(--dial-face-edge);
-  border: 2px solid var(--dial-bezel);
+     black LCD tile; no chrome — the rings stay the dials' jewellery. */
+  background: #000000;
+  border: 2px solid transparent;
   border-radius: 0.8cqw;
   /* Smaller than before so it does not overpower the dials. */
   font-family: "Oswald", system-ui, sans-serif;
@@ -910,9 +911,10 @@ fieldset.units label {
   line-height: 1.1;
 }
 
-/* At night the chrome disappears: no dial rims, no box around the gear
-   readout — only the lit marks and the floating gear number remain. */
+/* At night the chrome disappears: no dial rims, no white seam, no box around
+   the gear readout — only the lit marks and the floating gear number remain. */
 :root[data-theme="dark"] .gauge-bezel { stroke: transparent; }
+:root[data-theme="dark"] .gauge-surround { fill: transparent; }
 :root[data-theme="dark"] .gear-cluster {
   background: transparent;
   border-color: transparent;
@@ -930,6 +932,7 @@ fieldset.units label {
 .gauge-face-center { stop-color: var(--dial-face); }
 .gauge-face-edge { stop-color: var(--dial-face-edge); }
 .gauge-bezel { fill: none; stroke: var(--dial-bezel); stroke-width: 2.5; }
+.gauge-surround { fill: #ffffff; } /* the white seam between face and chrome */
 .gauge-tick-major { stroke: var(--dial-ink); stroke-width: 3.2; stroke-linecap: butt; }
 .gauge-tick-minor { stroke: var(--dial-ink-dim); stroke-width: 1; }
 /* Stroke width spans the tick ring, so the arc reads as a band on the dial edge. */
@@ -1381,7 +1384,7 @@ tbody td.is-current { background: var(--accent-soft); }
 
 .pedal:active { transform: translateY(2px) scale(0.96); }
 
-.pedal { --pedal-face: var(--dial-face); } /* same face as the dials */
+.pedal { --pedal-face: #2d3033; } /* same shell tone as the daylight pod */
 /* No outline — the plate is just its face, the slots in the dials' marker
    ink so the pedals read as part of the instrument set. */
 .pedal-body { fill: var(--pedal-face); }

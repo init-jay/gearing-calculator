@@ -2165,6 +2165,13 @@ function initPedals() {
     el.addEventListener("pointerup", stop);
     el.addEventListener("pointercancel", stop);
     el.addEventListener("lostpointercapture", stop);
+    // A couple of seconds into a hold, mobile browsers decide it's a system
+    // long-press (iOS loupe/callout, Android context menu) and fire
+    // pointercancel — which reads as a release mid-hold. touch-action and the
+    // pointerdown preventDefault above don't cover that path; only cancelling
+    // the compatibility touch event (and contextmenu on Android) does.
+    el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
   // Fold the pedals away once the engine-curve chart has scrolled up past the

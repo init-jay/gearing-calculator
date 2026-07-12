@@ -48,8 +48,8 @@
    keys off that attribute, never `prefers-color-scheme` directly. An inline head
    script sets it before first paint; the switch and system changes keep it live. */
 :root[data-theme="dark"] {
-  --bg: #0f1216;
-  --panel: #171b21;
+  --bg: #060708;
+  --panel: #000000;
   --text: #e7eaee;
   --muted: #9aa4b1;
   --border: #2a313a;
@@ -70,8 +70,10 @@
   --dial-ink: #ffa724;
   --dial-ink-dim: #b8781a;
   --dial-red: #ff3a1c;
-  --dial-hub: #180f05;
-  --dial-hub-edge: #3d2810;
+  /* Neutral, unlit: the hub is bare metal, not a backlit mark — no warm
+     tint that would read as glow. */
+  --dial-hub: #0e0f11;
+  --dial-hub-edge: #24272b;
   --dial-glow: #ffab2e;
 }
 
@@ -249,6 +251,9 @@ main {
   border-bottom: 1px solid var(--border);
 }
 
+/* Night cabin: the bar's divider joins the borderless look. */
+:root[data-theme="dark"] .topbar { border-bottom-color: transparent; }
+
 .topbar-speed {
   position: relative; /* anchors the hint overlaid inside the track */
   flex: 1;
@@ -315,7 +320,12 @@ main {
   cursor: pointer;
 }
 
+/* Like the cards, the Inputs button loses its outline at night — but hover
+   still lights the accent ring (the dark rule outranks a bare :hover, so the
+   dark hover needs restating). */
+:root[data-theme="dark"] .hamburger { border-color: transparent; }
 .hamburger:hover { border-color: var(--accent); }
+:root[data-theme="dark"] .hamburger:hover { border-color: var(--accent); }
 .hamburger svg { display: block; }
 .hamburger svg path { fill: currentColor; }
 /* Phone-first: an icon-only button, so it stays narrow and the theme switch
@@ -466,6 +476,11 @@ main {
   border-radius: var(--radius);
   padding: 1.25rem;
 }
+
+/* Night cabin: the cards dissolve into the black page — no outlines, just
+   content islands. (Border kept transparent, not removed, so nothing shifts
+   by a pixel when the theme flips.) */
+:root[data-theme="dark"] .panel { border-color: transparent; }
 
 .panel h2 {
   margin: 0 0 1rem;
@@ -787,6 +802,12 @@ fieldset.units label {
    hooded top corners, tighter at the bottom — floating just clear of the bar
    on its own darker face, the page scrolling by beneath and around it. */
 @media (max-width: 56.24rem) {
+  /* The pod's chrome is sized in cqw against the .dash wrapper (its own
+     inline-size container would only serve descendants), so pod and dials
+     scale together as one drawing: the proportions are locked to how the
+     cluster looks at the minimum 320px page width (1cqw = 2.48px there),
+     instead of rem chrome staying fixed while the dials grow. */
+  .dash { container-type: inline-size; }
   .gauges {
     position: sticky;
     top: calc(var(--topbar-h, 3.5rem) + 0.35rem);
@@ -794,26 +815,64 @@ fieldset.units label {
     /* Mixing a touch of --text into the panel moves the face toward contrast
        in both themes: a shade darker than the page in light, a shade lighter
        in dark — so the black dial faces still read against the pod. */
-    --pod-face: color-mix(in srgb, var(--text) 6%, var(--panel));
-    padding: 1.9rem 0.85rem 0.55rem;
+    --pod-face: color-mix(in srgb, var(--text) 13%, var(--panel));
+    /* Chrome kept lean: just enough hood over the dials for the arch to
+       clear their rings, so the pod spends its pixels on gauges, not face. */
+    padding: 8.5cqw 3.5cqw 2.5cqw;
+    gap: 2.4cqw;
+  }
+  /* The pod face lives on a pseudo rather than the element's own background:
+     negative-z children paint *over* their parent's background, so an
+     element-background pod could never sit above the ::before scrim. As a
+     z:-1 sibling of the z:-2 scrim it stacks correctly: scrim, face, dials. */
+  .gauges::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
     background: var(--pod-face);
     border: 1px solid var(--border);
     /* Elliptical top radii spanning half the width each make the whole top
        edge one continuous arch over both dials — a single rainbow hood, not
-       a rectangle and not a per-dial double binnacle. */
-    border-radius: 50% 50% 1.1rem 1.1rem / 5.2rem 5.2rem 1.1rem 1.1rem;
+       a rectangle and not a per-dial double binnacle. (Pseudo-element cqw
+       resolves against .gauges itself, whose content box is 93cqw of .dash,
+       hence these values are the .dash-relative ones divided by 0.93.) */
+    border-radius: 50% 50% 7.6cqw 7.6cqw / 28cqw 28cqw 7.6cqw 7.6cqw;
     box-shadow: 0 0.6rem 1.2rem -0.7rem rgba(0, 0, 0, 0.55);
   }
-  /* Dark cabin: nearly black — full black swallowed the dial faces, so keep
-     just enough panel tint that the pod stays a surface. */
+  /* Content sliding under the pod must not pop back out above it or peek
+     around the arch's shoulders — that reads as the pod floating loose.
+     This blanking plate rides with the pod: an opaque *panel-coloured*
+     rectangle over the pod's bounding box, reaching up under the topbar.
+     Everything that scrolls under the pod sits on the results panel, so
+     covering it with panel colour erases it seamlessly — and at rest the
+     plate is invisible, panel on panel. Kept narrower than the panel's
+     top padding so it never overpaints the panel's own border at rest;
+     behind the pod face (z -1), over the charts, under the topbar (5). */
+  .gauges::before {
+    content: "";
+    position: absolute;
+    z-index: -2; /* under the ::after pod face */
+    inset: -1.1rem 0 auto;
+    height: calc(1.1rem + 30cqw); /* topbar gap + the arch, at any width */
+    background: var(--panel);
+    pointer-events: none;
+  }
+  /* Dark cabin: black like the cards, bezel included — the pod is an
+     invisible surface; only its drop shadow and the lit dials give it away. */
   :root[data-theme="dark"] .gauges {
-    --pod-face: color-mix(in srgb, #000000 70%, var(--panel));
+    --pod-face: #000000;
+  }
+  :root[data-theme="dark"] .gauges::after {
+    border-color: #000000;
   }
   /* bottom: 0 is the padding-box edge; lift the gear box by the pod's bottom
      padding so it sits back on the dials' flat bottom line. (Scoped under
      .gauges to outrank the base .gear-cluster rule, which is declared later
-     in the file and would otherwise win the tie.) */
-  .gauges .gear-cluster { bottom: 0.55rem; }
+     in the file and would otherwise win the tie.) NB: this cqw resolves
+     against .gauges itself (the nearest container for its descendants), whose
+     content box is 100 - 2*3.5 = 93cqw of .dash: 2.5/0.93 = 2.7. */
+  .gauges .gear-cluster { bottom: 2.7cqw; }
 }
 
 /* Lifted out of the grid so it costs the dials no width. The dials are circles
@@ -849,6 +908,14 @@ fieldset.units label {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
+}
+
+/* At night the chrome disappears: no dial rims, no box around the gear
+   readout — only the lit marks and the floating gear number remain. */
+:root[data-theme="dark"] .gauge-bezel { stroke: transparent; }
+:root[data-theme="dark"] .gear-cluster {
+  background: transparent;
+  border-color: transparent;
 }
 
 /* Colour tracks the tach needle: white with a lone (single-setup) needle,
@@ -958,6 +1025,9 @@ fieldset.units label {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+
+/* Night cabin: chart frames go the way of the card borders. */
+:root[data-theme="dark"] .chart { border-color: transparent; }
 
 .chart-grid { stroke: var(--grid); stroke-width: 1; }
 .chart-axis { stroke: var(--muted); stroke-width: 1.2; opacity: 0.7; }
@@ -1311,15 +1381,17 @@ tbody td.is-current { background: var(--accent-soft); }
 
 .pedal:active { transform: translateY(2px) scale(0.96); }
 
-.pedal { --pedal-face: var(--panel); }
-:root[data-theme="dark"] .pedal { --pedal-face: #000000; }
-.pedal-body { fill: var(--pedal-face); stroke: var(--muted); stroke-width: 3; stroke-linejoin: round; }
+.pedal { --pedal-face: var(--dial-face); } /* same face as the dials */
+/* No outline — the plate is just its face, the slots in the dials' marker
+   ink so the pedals read as part of the instrument set. */
+.pedal-body { fill: var(--pedal-face); }
+.pedal-grip line { stroke: var(--dial-ink); stroke-width: 4; stroke-linecap: round; }
 
-/* In the dark cabin the pedals dim with the rest of the dash — strokes a step
-   darker than --muted. */
-:root[data-theme="dark"] .pedal-body,
-:root[data-theme="dark"] .pedal-grip line { stroke: #7d8794; }
-.pedal-grip line { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
+/* Night is the inverse scheme: gray rubber faces that stand off the black
+   page, with the slots cut in black. (Before the :active rules below, which
+   tie on specificity — later wins — so a press still lights the slots.) */
+:root[data-theme="dark"] .pedal { --pedal-face: #383d45; }
+:root[data-theme="dark"] .pedal-grip line { stroke: #000000; }
 .pedal-accel .pedal-grip line { stroke-width: 3.4; }
 
 /* Light up while held, each pedal in its own colour: the slots take the full

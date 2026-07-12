@@ -917,7 +917,7 @@ fieldset.units label {
    font glyphs: 5x9 dots, 1em tall, lit dots in the span's currentColor over
    the faint unlit grid — an old odometer LCD. */
 .gear-cluster span { display: inline-flex; align-items: center; gap: 0.14em; }
-.dot-char { height: 1em; width: auto; aspect-ratio: 50 / 90; display: block; }
+.dot-char { height: 1.2em; width: auto; aspect-ratio: 50 / 90; display: block; }
 .dot-char .dot-on { fill: currentColor; }
 .dot-char .dot-off { fill: currentColor; opacity: 0.13; }
 

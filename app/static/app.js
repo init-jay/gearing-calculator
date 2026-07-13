@@ -235,6 +235,28 @@ function renderGauge(svg, { needles, max, step, legend, redlineAt = null, thousa
   const angleFor = (v) => GAUGE_START + (max > 0 ? v / max : 0) * GAUGE_SWEEP;
   const inRedline = (v) => redlineAt !== null && v >= redlineAt;
 
+  // Needles are drawn once pointing at the zero mark and swung into place by
+  // a style rotation, so moving one never redraws it.
+  const rotate = (el, value) => {
+    const clamped = Math.max(0, Math.min(value, max));
+    el.style.transform = `rotate(${angleFor(clamped) - GAUGE_START}deg)`;
+  };
+
+  // The face only changes when the inputs reshape the dial; the needles move
+  // every frame under a held pedal. Rebuilding the svg per frame would tear
+  // each needle out of the DOM mid-move, snapping it between quantized
+  // angles — kept in place, the CSS transition on .gauge-needle sweeps it
+  // smoothly to each new target instead.
+  const face = JSON.stringify(
+    [max, step, legend, redlineAt, thousands, needles.map((n) => n.cls)]);
+  if (svg.dataset.face === face) {
+    for (const el of svg.querySelectorAll("[data-needle]")) {
+      rotate(el, needles[el.dataset.needle].value);
+    }
+    return;
+  }
+  svg.dataset.face = face;
+
   svg.replaceChildren();
 
   // Both dials live in one document, so gradient ids must not collide.
@@ -313,9 +335,13 @@ function renderGauge(svg, { needles, max, step, legend, redlineAt = null, thousa
   });
 
   // Reversed so the first entry — the reference setup — is drawn last, on top.
-  [...needles].reverse().forEach(({ value, cls }) => {
-    const clamped = Math.max(0, Math.min(value, max));
-    svg.append(needlePolygon(cls, cx, cy, angleFor(clamped)));
+  // data-needle carries the original index, so the fast path above can match
+  // each polygon back to its value despite the reversed draw order.
+  needles.map((n, i) => ({ ...n, i })).reverse().forEach(({ value, cls, i }) => {
+    const el = needlePolygon(cls, cx, cy, GAUGE_START);
+    el.dataset.needle = i;
+    rotate(el, value); // set before insertion: no transition on first paint
+    svg.append(el);
   });
 
   // Drawn after the needles so their bases disappear beneath the hub cap.

@@ -964,7 +964,20 @@ fieldset.units label {
 /* Busy dial (20-major speedo): smaller numerals so the crowded top clears.
    After the width rules — same specificity, so order decides. */
 .gauge[data-dense="yes"] .gauge-tick-label { font-size: 9px; }
-.gauge-needle { fill: var(--dial-ink); }
+
+/* Needles pivot on the hub via a style rotation (see renderGauge): the
+   transition glides them between the discrete per-frame targets, which is
+   what makes a sweep read as one smooth motion instead of integer steps.
+   transform-box makes the px origin count in viewBox units. */
+.gauge-needle {
+  fill: var(--dial-ink);
+  transform-box: view-box;
+  transform-origin: 100px 100px;
+  transition: transform 0.14s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gauge-needle { transition: none; }
+}
 
 /* Comparing puts a needle per setup on the one tach face. They take the setup's
    colour — the same amber and blue as its number in the readout and its trace on

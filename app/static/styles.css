@@ -1044,6 +1044,22 @@ fieldset.units label {
 /* Slim bands keep their "N%" label at a smaller size so it still fits. */
 .spread-seg-slim { font-size: 0.6rem; }
 
+/* The caption's editable range ceiling: styled as a quiet inline field so the
+   sentence still reads as a sentence. Tag-qualified to outrank the global
+   full-width input[type="number"] form styling. */
+input.spread-cap {
+  display: inline-block;
+  width: 3.8em;
+  padding: 0 0.15em;
+  margin: 0 0.15em;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
 .spread-seg:first-child { border-radius: 3px 0 0 3px; }
 .spread-seg:last-child { border-right: none; border-radius: 0 3px 3px 0; }
 

@@ -447,8 +447,11 @@ function renderChart(svg, series, speed) {
 
   // Road speed runs along X because it increases monotonically through a run,
   // so the shift trace reads left-to-right as a sawtooth. Both axes span the
-  // union of the setups, so the two runs share one frame of reference.
-  const xMax = Math.max(...series.map((s) => s.result.max_speed)) * X_HEADROOM || 1;
+  // union of the setups, so the two runs share one frame of reference — unless
+  // the spread bar's ceiling is set, which zooms this chart to the same
+  // 0–ceiling range so the bar's bands stay under the gear rays.
+  const top = Math.max(...series.map((s) => s.result.max_speed)) || 1;
+  const xMax = (speedViewCap(top) ?? top) * X_HEADROOM;
   const yMax = Math.max(...series.map((s) => s.result.max_rpm));
 
   const { xPix, yPix } = drawFrame(svg, {
@@ -457,17 +460,33 @@ function renderChart(svg, series, speed) {
     yTitle: "Engine RPM",
   });
 
+  // Zoomed in, the rays and traces run past the right edge; clip them to the
+  // plot box instead of letting them bleed into the margin.
+  const defs = svgEl("defs");
+  const clip = svgEl("clipPath", { id: "chart-plot-clip" });
+  clip.append(svgEl("rect", {
+    x: M.left, y: 0, width: W - M.left - M.right, height: H - M.bottom,
+  }));
+  defs.append(clip);
+  svg.append(defs);
+  const plot = svgEl("g", { "clip-path": "url(#chart-plot-clip)" });
+  svg.append(plot);
+
   // One polyline per gear. They share a color, so each is named where it ends —
-  // at max RPM, spread along the top edge by the gear's top speed.
+  // at max RPM, spread along the top edge by the gear's top speed. A gear
+  // whose end lies beyond the (possibly capped) axis keeps its ray but not its
+  // label, which would otherwise print past the plot's edge.
   if (!compare) {
     series[0].result.curves.forEach((curve) => {
       const pts = curve.samples.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
-      svg.append(svgEl("polyline", { class: "chart-line", points: pts }));
-      svg.append(
-        svgEl("text", {
-          class: "chart-gear-label", x: xPix(curve.top_speed), y: M.top - 6, "text-anchor": "middle",
-        }, String(curve.gear))
-      );
+      plot.append(svgEl("polyline", { class: "chart-line", points: pts }));
+      if (curve.top_speed <= xMax) {
+        svg.append(
+          svgEl("text", {
+            class: "chart-gear-label", x: xPix(curve.top_speed), y: M.top - 6, "text-anchor": "middle",
+          }, String(curve.gear))
+        );
+      }
     });
   }
 
@@ -476,9 +495,10 @@ function renderChart(svg, series, speed) {
   series.forEach((s) => {
     if (!s.result.trace.length) return;
     const pts = s.result.trace.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
-    svg.append(svgEl("polyline", { class: `chart-trace chart-trace-${s.key}`, points: pts }));
+    plot.append(svgEl("polyline", { class: `chart-trace chart-trace-${s.key}`, points: pts }));
     s.result.shifts.forEach((shift) => {
-      svg.append(
+      if (shift.speed > xMax) return;
+      plot.append(
         svgEl("circle", {
           class: "chart-shift", cx: xPix(shift.speed), cy: yPix(s.result.shift_rpm), r: 3,
         })
@@ -491,7 +511,7 @@ function renderChart(svg, series, speed) {
   // puts its marker off the top of the plot; it is dropped rather than clamped.
   series.forEach((s) => {
     if (speed < 0 || speed > xMax || s.at.rpm > yMax) return;
-    svg.append(
+    plot.append(
       svgEl("circle", {
         class: `chart-marker chart-marker-${s.key}`, cx: xPix(speed), cy: yPix(s.at.rpm), r: 4,
       })
@@ -555,12 +575,34 @@ const SPREAD_LABEL_SHARE = 0.08;
  * a slower setup's bar ends short and the two can be read against each other —
  * and against the speed axis of the chart directly below.
  */
+// The spread defaults to splitting the full 0–top-speed range; the editable
+// ceiling in its caption re-reads the shares against 0–<chosen speed> instead
+// (how the gears divide real road speeds, not the theoretical top end).
+// Stored with its unit so a metric/imperial flip resets it rather than
+// silently misreading the number in the other unit.
+let spreadCap = null;
+let spreadCapUnit = null;
+
+/** The ceiling as it applies to a range topping out at `top`: the RPM-vs-speed
+ *  chart scales its x-axis to this too, so the bar keeps lining up with the
+ *  gear rays. Null when unset or out of range. */
+function speedViewCap(top) {
+  return spreadCap !== null && spreadCap > 0 && spreadCap < top ? spreadCap : null;
+}
+
 function renderSpread(el, series) {
   el.replaceChildren();
   const compare = series.length > 1;
   const unit = series[0].result.speed_unit;
   const top = Math.max(...series.map((s) => s.result.max_speed));
   if (!(top > 0)) return;
+
+  if (spreadCapUnit !== null && spreadCapUnit !== unit) {
+    spreadCap = null;
+    spreadCapUnit = null;
+  }
+  const cap = speedViewCap(top);
+  const upTo = cap ?? top;
 
   // Inset the bars to the chart's plot box, and end them where the chart puts the
   // top speed, so a gear's band sits directly over the speeds it covers below.
@@ -569,9 +611,25 @@ function renderSpread(el, series) {
   el.style.setProperty("--plot-left", pct(CHART.M.left));
   el.style.setProperty("--plot-width", pct(plotW / CHART.X_HEADROOM));
 
+  // The caption's number is the range ceiling, editable in place. `change`,
+  // not `input`: re-rendering per keystroke would tear the field out from
+  // under the cursor.
   const caption = document.createElement("p");
   caption.className = "spread-caption";
-  caption.textContent = `Share of 0–${Math.round(top)} ${unit} covered by each gear`;
+  const capInput = document.createElement("input");
+  capInput.type = "number";
+  capInput.className = "spread-cap";
+  capInput.min = "1";
+  capInput.value = String(Math.round(upTo));
+  capInput.setAttribute(
+    "aria-label", `Count gear shares up to this speed (${unit})`);
+  capInput.addEventListener("change", () => {
+    const v = parseFloat(capInput.value);
+    spreadCap = Number.isFinite(v) && v > 0 && v < top ? v : null;
+    spreadCapUnit = spreadCap === null ? null : unit;
+    redraw();
+  });
+  caption.append("Share of 0–", capInput, ` ${unit} covered by each gear`);
   el.append(caption);
 
   series.forEach((s) => {
@@ -590,21 +648,31 @@ function renderSpread(el, series) {
     const gears = s.result.spread.length;
 
     s.result.spread.forEach((span, i) => {
+      // The stretch of this gear's band that falls below the ceiling; a gear
+      // entirely above it contributes nothing and draws nothing.
+      const covered =
+        Math.min(span.to_speed, upTo) - Math.min(span.from_speed, upTo);
+      if (cap !== null && covered <= 0) return;
+
       const seg = document.createElement("div");
       seg.className = "spread-seg";
-      // Widths are a share of the union top speed, not of this setup's own, so
-      // the bar of a slower setup genuinely stops short of the full width.
-      seg.style.flex = `0 0 ${((span.to_speed - span.from_speed) / top) * 100}%`;
+      // Widths are a share of the viewed range — the ceiling when set, else
+      // the union top speed — which is also the chart's x-domain, so the
+      // bands stay aligned under the gear rays. A slower setup's bar (or an
+      // uncapped one under headroom) still stops short of the full width.
+      seg.style.flex = `0 0 ${(covered / upTo) * 100}%`;
       const fade = gears > 1 ? i / (gears - 1) : 0;
       seg.style.background = `rgba(${SPREAD_RGB[s.key]}, ${1 - (1 - SPREAD_MIN_ALPHA) * fade})`;
 
-      const pct = Math.round(span.share * 100);
+      const share = cap === null ? span.share : covered / upTo;
+      const pct = Math.round(share * 100);
+      const toShown = Math.min(span.to_speed, upTo);
       seg.title =
-        `Gear ${span.gear}: ${span.from_speed.toFixed(1)}–${span.to_speed.toFixed(1)} ${unit}` +
-        ` (${pct}% of the range)`;
+        `Gear ${span.gear}: ${span.from_speed.toFixed(1)}–${toShown.toFixed(1)} ${unit}` +
+        ` (${pct}% of 0–${Math.round(upTo)} ${unit})`;
       seg.textContent = `${pct}%`;
       // Slim bands keep the full label but set it smaller so it fits.
-      if (span.share < SPREAD_LABEL_SHARE) seg.classList.add("spread-seg-slim");
+      if (share < SPREAD_LABEL_SHARE) seg.classList.add("spread-seg-slim");
       bar.append(seg);
     });
 

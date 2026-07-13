@@ -1041,6 +1041,9 @@ fieldset.units label {
   color: var(--dial-face-edge);
 }
 
+/* Slim bands keep their "N%" label at a smaller size so it still fits. */
+.spread-seg-slim { font-size: 0.6rem; }
+
 .spread-seg:first-child { border-radius: 3px 0 0 3px; }
 .spread-seg:last-child { border-right: none; border-radius: 0 3px 3px 0; }
 

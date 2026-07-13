@@ -367,13 +367,13 @@ function niceStep(x) {
  * gets tick marks and labels but no gridlines: its nice steps land at different
  * heights from the left axis's, and two interleaved grids read as noise.
  */
-function drawFrame(svg, { W, H, M, xMax, yMax, xTitle, yTitle, y2Max = 0, y2Title = "" }) {
+function drawFrame(svg, { W, H, M, xMax, yMax, xTitle, yTitle, xMin = 0, y2Max = 0, y2Title = "" }) {
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom;
   const right = W - M.right;
   const bottom = M.top + plotH;
 
-  const xPix = (v) => M.left + (v / xMax) * plotW;
+  const xPix = (v) => M.left + ((v - xMin) / (xMax - xMin)) * plotW;
   const yPix = (v) => bottom - (v / yMax) * plotH;
   const y2Pix = (v) => bottom - (v / y2Max) * plotH;
 
@@ -389,8 +389,8 @@ function drawFrame(svg, { W, H, M, xMax, yMax, xTitle, yTitle, y2Max = 0, y2Titl
     );
   }
 
-  const xStep = niceStep(xMax / 6);
-  for (let v = 0; v <= xMax; v += xStep) {
+  const xStep = niceStep((xMax - xMin) / 6);
+  for (let v = Math.ceil(xMin / xStep) * xStep; v <= xMax; v += xStep) {
     const x = xPix(v);
     svg.append(svgEl("line", { class: "chart-grid", x1: x, y1: M.top, x2: x, y2: bottom }));
     svg.append(
@@ -448,20 +448,22 @@ function renderChart(svg, series, speed) {
   // Road speed runs along X because it increases monotonically through a run,
   // so the shift trace reads left-to-right as a sawtooth. Both axes span the
   // union of the setups, so the two runs share one frame of reference — unless
-  // the spread bar's ceiling is set, which zooms this chart to the same
-  // 0–ceiling range so the bar's bands stay under the gear rays.
+  // the spread bar's bounds are set, which zoom this chart to the same
+  // floor–ceiling window so the bar's bands stay under the gear rays.
   const top = Math.max(...series.map((s) => s.result.max_speed)) || 1;
-  const xMax = (speedViewCap(top) ?? top) * X_HEADROOM;
+  const { lo, hi } = speedViewRange(top);
+  const xMin = lo;
+  const xMax = lo + (hi - lo) * X_HEADROOM;
   const yMax = Math.max(...series.map((s) => s.result.max_rpm));
 
   const { xPix, yPix } = drawFrame(svg, {
-    W, H, M, xMax, yMax,
+    W, H, M, xMin, xMax, yMax,
     xTitle: `Speed (${series[0].result.speed_unit})`,
     yTitle: "Engine RPM",
   });
 
-  // Zoomed in, the rays and traces run past the right edge; clip them to the
-  // plot box instead of letting them bleed into the margin.
+  // Zoomed in, the rays and traces run past the window's edges; clip them to
+  // the plot box instead of letting them bleed into the margins.
   const defs = svgEl("defs");
   const clip = svgEl("clipPath", { id: "chart-plot-clip" });
   clip.append(svgEl("rect", {
@@ -480,7 +482,7 @@ function renderChart(svg, series, speed) {
     series[0].result.curves.forEach((curve) => {
       const pts = curve.samples.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
       plot.append(svgEl("polyline", { class: "chart-line", points: pts }));
-      if (curve.top_speed <= xMax) {
+      if (curve.top_speed >= xMin && curve.top_speed <= xMax) {
         svg.append(
           svgEl("text", {
             class: "chart-gear-label", x: xPix(curve.top_speed), y: M.top - 6, "text-anchor": "middle",
@@ -497,7 +499,7 @@ function renderChart(svg, series, speed) {
     const pts = s.result.trace.map(([rpm, spd]) => `${xPix(spd)},${yPix(rpm)}`).join(" ");
     plot.append(svgEl("polyline", { class: `chart-trace chart-trace-${s.key}`, points: pts }));
     s.result.shifts.forEach((shift) => {
-      if (shift.speed > xMax) return;
+      if (shift.speed < xMin || shift.speed > xMax) return;
       plot.append(
         svgEl("circle", {
           class: "chart-shift", cx: xPix(shift.speed), cy: yPix(s.result.shift_rpm), r: 3,
@@ -510,7 +512,7 @@ function renderChart(svg, series, speed) {
   // A setup that cannot reach this speed would need more rpm than it has, which
   // puts its marker off the top of the plot; it is dropped rather than clamped.
   series.forEach((s) => {
-    if (speed < 0 || speed > xMax || s.at.rpm > yMax) return;
+    if (speed < xMin || speed > xMax || s.at.rpm > yMax) return;
     plot.append(
       svgEl("circle", {
         class: `chart-marker chart-marker-${s.key}`, cx: xPix(speed), cy: yPix(s.at.rpm), r: 4,
@@ -576,18 +578,21 @@ const SPREAD_LABEL_SHARE = 0.08;
  * and against the speed axis of the chart directly below.
  */
 // The spread defaults to splitting the full 0–top-speed range; the editable
-// ceiling in its caption re-reads the shares against 0–<chosen speed> instead
-// (how the gears divide real road speeds, not the theoretical top end).
-// Stored with its unit so a metric/imperial flip resets it rather than
-// silently misreading the number in the other unit.
+// bounds in its caption re-read the shares against <floor>–<ceiling> instead
+// (how the gears divide the speeds actually driven — say 40–100 through town —
+// not the theoretical full range). Stored with their unit so a metric/imperial
+// flip resets them rather than silently misreading the numbers.
+let spreadFloor = null;
 let spreadCap = null;
 let spreadCapUnit = null;
 
-/** The ceiling as it applies to a range topping out at `top`: the RPM-vs-speed
- *  chart scales its x-axis to this too, so the bar keeps lining up with the
- *  gear rays. Null when unset or out of range. */
-function speedViewCap(top) {
-  return spreadCap !== null && spreadCap > 0 && spreadCap < top ? spreadCap : null;
+/** The viewed speed window for a range topping out at `top`: the bounds where
+ *  valid, else 0/top. The RPM-vs-speed chart scales its x-axis to the same
+ *  window, so the bar keeps lining up with the gear rays. */
+function speedViewRange(top) {
+  const hi = spreadCap !== null && spreadCap > 0 && spreadCap < top ? spreadCap : top;
+  const lo = spreadFloor !== null && spreadFloor > 0 && spreadFloor < hi ? spreadFloor : 0;
+  return { lo, hi, zoomed: lo > 0 || hi < top };
 }
 
 function renderSpread(el, series) {
@@ -598,11 +603,12 @@ function renderSpread(el, series) {
   if (!(top > 0)) return;
 
   if (spreadCapUnit !== null && spreadCapUnit !== unit) {
+    spreadFloor = null;
     spreadCap = null;
     spreadCapUnit = null;
   }
-  const cap = speedViewCap(top);
-  const upTo = cap ?? top;
+  const { lo, hi, zoomed } = speedViewRange(top);
+  const window = hi - lo;
 
   // Inset the bars to the chart's plot box, and end them where the chart puts the
   // top speed, so a gear's band sits directly over the speeds it covers below.
@@ -611,25 +617,36 @@ function renderSpread(el, series) {
   el.style.setProperty("--plot-left", pct(CHART.M.left));
   el.style.setProperty("--plot-width", pct(plotW / CHART.X_HEADROOM));
 
-  // The caption's number is the range ceiling, editable in place. `change`,
+  // The caption's numbers are the window bounds, editable in place. `change`,
   // not `input`: re-rendering per keystroke would tear the field out from
   // under the cursor.
   const caption = document.createElement("p");
   caption.className = "spread-caption";
-  const capInput = document.createElement("input");
-  capInput.type = "number";
-  capInput.className = "spread-cap";
-  capInput.min = "1";
-  capInput.value = String(Math.round(upTo));
-  capInput.setAttribute(
-    "aria-label", `Count gear shares up to this speed (${unit})`);
-  capInput.addEventListener("change", () => {
-    const v = parseFloat(capInput.value);
-    spreadCap = Number.isFinite(v) && v > 0 && v < top ? v : null;
-    spreadCapUnit = spreadCap === null ? null : unit;
+  const bound = (value, label) => {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "spread-cap";
+    input.min = "0";
+    input.value = String(Math.round(value));
+    input.setAttribute("aria-label", `${label} (${unit})`);
+    return input;
+  };
+  const floorInput = bound(lo, "Count gear shares from this speed");
+  const capInput = bound(hi, "Count gear shares up to this speed");
+  const commit = () => {
+    const loV = parseFloat(floorInput.value);
+    const hiV = parseFloat(capInput.value);
+    spreadFloor = Number.isFinite(loV) && loV > 0 && loV < top ? loV : null;
+    spreadCap = Number.isFinite(hiV) && hiV > 0 && hiV < top ? hiV : null;
+    // An inverted window means one bound is a mistake; keep the ceiling.
+    if (spreadFloor !== null && spreadFloor >= (spreadCap ?? top)) spreadFloor = null;
+    spreadCapUnit = spreadFloor === null && spreadCap === null ? null : unit;
     redraw();
-  });
-  caption.append("Share of 0–", capInput, ` ${unit} covered by each gear`);
+  };
+  floorInput.addEventListener("change", commit);
+  capInput.addEventListener("change", commit);
+  caption.append("Share of ", floorInput, "–", capInput,
+    ` ${unit} covered by each gear`);
   el.append(caption);
 
   series.forEach((s) => {
@@ -648,28 +665,28 @@ function renderSpread(el, series) {
     const gears = s.result.spread.length;
 
     s.result.spread.forEach((span, i) => {
-      // The stretch of this gear's band that falls below the ceiling; a gear
-      // entirely above it contributes nothing and draws nothing.
-      const covered =
-        Math.min(span.to_speed, upTo) - Math.min(span.from_speed, upTo);
-      if (cap !== null && covered <= 0) return;
+      // The stretch of this gear's band that falls inside the window; a gear
+      // entirely outside it contributes nothing and draws nothing.
+      const from = Math.max(span.from_speed, lo);
+      const to = Math.min(span.to_speed, hi);
+      const covered = to - from;
+      if (zoomed && covered <= 0) return;
 
       const seg = document.createElement("div");
       seg.className = "spread-seg";
-      // Widths are a share of the viewed range — the ceiling when set, else
-      // the union top speed — which is also the chart's x-domain, so the
-      // bands stay aligned under the gear rays. A slower setup's bar (or an
-      // uncapped one under headroom) still stops short of the full width.
-      seg.style.flex = `0 0 ${(covered / upTo) * 100}%`;
+      // Widths are a share of the viewed window — the bounds when set, else
+      // 0–union-top — which is also the chart's x-domain, so the bands stay
+      // aligned under the gear rays. A slower setup's bar (or an unzoomed one
+      // under headroom) still stops short of the full width.
+      seg.style.flex = `0 0 ${(covered / window) * 100}%`;
       const fade = gears > 1 ? i / (gears - 1) : 0;
       seg.style.background = `rgba(${SPREAD_RGB[s.key]}, ${1 - (1 - SPREAD_MIN_ALPHA) * fade})`;
 
-      const share = cap === null ? span.share : covered / upTo;
+      const share = zoomed ? covered / window : span.share;
       const pct = Math.round(share * 100);
-      const toShown = Math.min(span.to_speed, upTo);
       seg.title =
-        `Gear ${span.gear}: ${span.from_speed.toFixed(1)}–${toShown.toFixed(1)} ${unit}` +
-        ` (${pct}% of 0–${Math.round(upTo)} ${unit})`;
+        `Gear ${span.gear}: ${from.toFixed(1)}–${to.toFixed(1)} ${unit}` +
+        ` (${pct}% of ${Math.round(lo)}–${Math.round(hi)} ${unit})`;
       seg.textContent = `${pct}%`;
       // Slim bands keep the full label but set it smaller so it fits.
       if (share < SPREAD_LABEL_SHARE) seg.classList.add("spread-seg-slim");

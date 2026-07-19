@@ -115,20 +115,43 @@
       <p>
         The apps use the same gearing math as the website, but nothing is
         fetched from the web to run it. The iOS app is a native SwiftUI
-        interface backed by an embedded CPython runtime, bundled inside the
-        app package; the Android app follows the same on-device design. There
-        is no server component and no network call involved in producing a
-        result — the app works with no internet connection at all, including
-        in airplane mode.
+        interface backed by a full copy of CPython — not the WebAssembly
+        build the website uses — embedded directly in the compiled app
+        binary, along with a trimmed copy of the Python standard library. No
+        interpreter or runtime is downloaded at install time or launch time;
+        it all ships inside the signed app bundle.
+      </p>
+      <p>
+        The interpreter starts once, in an isolated configuration that
+        ignores any <code>PYTHONPATH</code>/<code>PYTHONHOME</code>
+        environment variables or user-level site configuration a normal
+        Python install would read, with its own <code>PYTHONHOME</code>
+        pointed at that bundled standard library and bytecode caching turned
+        off (the app's install location is read-only and signed, so nothing
+        is written back to it). It then runs for the rest of the app's
+        lifetime on a single dedicated background thread, kept separate from
+        the UI thread throughout. The SwiftUI layer talks to it by encoding
+        your inputs as JSON and calling one bridge function directly through
+        the Python C API in-process — never a socket, pipe, XPC connection,
+        or any other inter-process channel — and gets a JSON string back on
+        that same thread. The Android app follows the same on-device design.
+        There is no server component and no network call involved in
+        producing a result — the app works with no internet connection at
+        all, including in airplane mode.
       </p>
 
       <h3>Local storage</h3>
       <p>
-        Anything the app remembers between launches — such as your last
-        setup or theme preference — is saved locally using the platform's
-        standard on-device storage (e.g. <code>UserDefaults</code> on iOS).
-        It is never transmitted anywhere and is removed if you uninstall the
-        app.
+        Anything the app remembers between launches is saved locally, split
+        across two on-device mechanisms depending on what it is. A couple of
+        small interface preferences (such as your light/dark mode choice)
+        are saved via iOS's standard <code>UserDefaults</code>. Your actual
+        drivetrain data — the setups you've entered, anything saved to the
+        Garage, and any saved laps (including an imported RaceChrono GPS
+        trace) — is saved as plain JSON files in the app's sandboxed
+        Application Support directory, a location private to this app that
+        no other app can read. Neither is transmitted anywhere, and both are
+        removed if you uninstall the app.
       </p>
 
       <h3>Permissions</h3>
@@ -136,6 +159,17 @@
         The apps do not request access to your camera, microphone, location,
         contacts, photos, or any other device permission. None are needed to
         calculate gear ratios.
+      </p>
+      <p>
+        Two features read a file you pick yourself — importing a setup shared
+        as a QR code image, and importing a lap from a RaceChrono CSV export —
+        and neither needs a permission grant to do it. Both go through iOS's
+        system pickers (the Photos picker and the Files picker), which run
+        outside the app's process and hand back only the specific item you
+        select; the app is never given standing access to your whole photo
+        library or file system. Reading the QR code out of a picked image
+        happens entirely on-device, using Apple's Vision framework — there is
+        no camera preview, no live scanning, and no network call involved.
       </p>
 
       <h3>Third parties</h3>

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — Gearing Calculator</title>
+  <link rel="icon" href="../favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../styles.css" />
+  <script>
+    (function () {
+      try {
+        var pref = localStorage.getItem("gc-theme") || "auto";
+        var dark = pref === "dark" ||
+          (pref !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
+  <style>
+    .policy {
+      max-width: 40em;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+      line-height: 1.6;
+    }
+    .policy h1 { margin-bottom: 0.25rem; }
+    .policy .updated { color: var(--muted); margin-top: 0; margin-bottom: 2rem; font-size: 0.9em; }
+    .policy h2 { margin-top: 2rem; font-size: 1.15em; }
+    .policy a { color: var(--accent); }
+    .policy .back { display: inline-block; margin-bottom: 1.5rem; color: var(--muted); text-decoration: none; }
+    .policy .back:hover { color: var(--accent); }
+    .policy h3 { margin-top: 1.5rem; font-size: 1em; }
+    .policy .platform {
+      border-left: 3px solid var(--border);
+      padding-left: 1rem;
+      margin: 1.5rem 0;
+    }
+  </style>
+</head>
+<body>
+  <main class="policy">
+    <a class="back" href="../">&larr; Back to Gearing Calculator</a>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: July 19, 2026</p>
+
+    <p>
+      Gearing Calculator is a gearbox/diff/engine simulator, available as a
+      website and as native iOS and Android apps. This one policy covers all
+      three — they share the same no-collection design, described per
+      platform below.
+    </p>
+
+    <h2>Short version</h2>
+    <p>
+      We don't collect anything, on any platform. There are no accounts, no
+      forms, no analytics, and no advertising. The inputs you enter — gear
+      ratios, tire size, engine curves — are calculated on your device and
+      never leave it.
+    </p>
+
+    <h2>Web</h2>
+    <div class="platform">
+      <h3>What runs where</h3>
+      <p>
+        The calculator's math runs in your browser via
+        <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>,
+        a Python runtime compiled to WebAssembly. The server's only job is to
+        hand your browser the page, script, and data files; after that,
+        nothing you type is sent back to it. There is no backend that
+        processes, stores, or transmits your inputs.
+      </p>
+
+      <h3>Local storage</h3>
+      <p>
+        The site remembers one thing on your device: your light/dark theme
+        preference, stored in your browser's <code>localStorage</code>. It
+        never leaves your device and is not readable by us or anyone else.
+      </p>
+
+      <h3>Export / import</h3>
+      <p>
+        The "Export inputs" and "Import inputs" buttons save and load a JSON
+        file directly through your browser's file picker. That file goes
+        wherever you choose to save it on your own device — it is never
+        uploaded anywhere.
+      </p>
+
+      <h3>Third-party requests</h3>
+      <p>
+        To run Python in the browser, the page loads the Pyodide WebAssembly
+        runtime from the <a href="https://www.jsdelivr.com/" target="_blank" rel="noopener">jsDelivr</a>
+        CDN. That request is subject to jsDelivr's own privacy practices, and
+        like any network request it exposes standard technical information
+        (such as your IP address) to jsDelivr. No other third-party services
+        are contacted, and the calculator itself sends nothing to jsDelivr or
+        anywhere else beyond that one file fetch.
+      </p>
+
+      <h3>Server logs</h3>
+      <p>
+        Like most web servers, ours may record basic technical details of
+        each request — such as IP address, browser type, and time of access
+        — for operational purposes like diagnosing errors and preventing
+        abuse. These logs are not used to identify individuals or track
+        behavior across visits.
+      </p>
+    </div>
+
+    <h2>iOS and Android apps</h2>
+    <div class="platform">
+      <h3>What runs where</h3>
+      <p>
+        The apps use the same gearing math as the website, but nothing is
+        fetched from the web to run it. The iOS app is a native SwiftUI
+        interface backed by an embedded CPython runtime, bundled inside the
+        app package; the Android app follows the same on-device design. There
+        is no server component and no network call involved in producing a
+        result — the app works with no internet connection at all, including
+        in airplane mode.
+      </p>
+
+      <h3>Local storage</h3>
+      <p>
+        Anything the app remembers between launches — such as your last
+        setup or theme preference — is saved locally using the platform's
+        standard on-device storage (e.g. <code>UserDefaults</code> on iOS).
+        It is never transmitted anywhere and is removed if you uninstall the
+        app.
+      </p>
+
+      <h3>Permissions</h3>
+      <p>
+        The apps do not request access to your camera, microphone, location,
+        contacts, photos, or any other device permission. None are needed to
+        calculate gear ratios.
+      </p>
+
+      <h3>Third parties</h3>
+      <p>
+        The apps do not use analytics, advertising, or crash-reporting SDKs,
+        and make no network requests of any kind. Nothing is sent to us or to
+        any third party.
+      </p>
+    </div>
+
+    <h2>Children's privacy</h2>
+    <p>
+      None of the three — website, iOS app, or Android app — collects
+      personal information from anyone, including children.
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If this policy changes, the updated version will be posted on this
+      page with a new "last updated" date.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Questions about this policy can be sent to
+      <a href="mailto:engineering@kranky.dev">engineering@kranky.dev</a>.
+    </p>
+  </main>
+</body>
+</html>

@@ -1447,3 +1447,11 @@ tbody td.is-current { background: var(--accent-soft); }
 .pedal-brake:active .pedal-grip line { stroke: var(--needle); }
 .pedal-accel:active .pedal-body { fill: color-mix(in srgb, var(--dial-amber) 35%, var(--pedal-face)); }
 .pedal-brake:active .pedal-body { fill: color-mix(in srgb, var(--needle) 35%, var(--pedal-face)); }
+
+.page-footer {
+  text-align: center;
+  padding: 1.5rem 0 0.5rem;
+  font-size: 0.8rem;
+}
+.page-footer a { color: var(--muted); }
+.page-footer a:hover { color: var(--accent); }

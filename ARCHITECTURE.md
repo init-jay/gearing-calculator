@@ -88,6 +88,7 @@ form, and scrape the result back out of the DOM: it can fetch `calc.py` once
 and call `compute()` directly, the same way `tests/test_calc.py` does. The
 web page is one consumer of this module, not the only one.
 
+
 ### Real example of Claude using the site's calculator
 
 Asked to compare a BMW E86 automatic against a manual gearbox swap, Claude
@@ -99,7 +100,13 @@ for anything that can run Python.
 
 ![Claude fetching calc.py from gears.kranky.dev and running it directly to answer a gearing question](docs/claude.png)
 
+## Shortcomings 
 
+Of course, this is not a fully context optimised way for the agent to use the mathematical model.
+Accessing the calculator this way means the agent will have the entire source code of `calc.py` in its context window. The benefit is just that it removes the need for browser interaction and allows the mathematical model to be driven via its source code, as long as agent has a python sandbox to execute it. 
+
+A more optimistic way to look at `calc.py` is that it's a deterministic mathematical model of the gearing drivetrain physics that the agent does not need to spend any loops (and tokens) to probablistically reason through in order to answer a question about this particular knowledge domain, presented in a way such that the agent does not need to explore it via a typical human UI.
+ 
 
 ## Boot sequence
 

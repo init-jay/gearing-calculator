@@ -11,11 +11,8 @@ Also available as a native iOS app: **[ThirdGear on Apple App Store](https://app
 
 ## Why this is interesting
 
-Identical core physical model in python, with native interfaces for the consumer (human or machine). No remote backend required.
+This little website is designed to be easy for both humans and machines (AI Agents) to use.
 
-See
-[ARCHITECTURE.md](ARCHITECTURE.md) for more details on the design and how that's wired up, the physics
-behind the model, and how to run the app locally.
 
 ```mermaid
 flowchart TD
@@ -30,7 +27,9 @@ flowchart TD
     end
     Agent --> Core
 ```
-
+See
+[ARCHITECTURE.md](ARCHITECTURE.md) for more details on the design and how that's wired up, the physics
+behind the model, and how to run the app locally.
 
 ## Mathematical Features
 

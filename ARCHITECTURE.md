@@ -5,7 +5,7 @@ app actually does, see the [README](README.md).
 
 ## The main idea
 
-Multiple human interfaces, one agent friendly mathemtical core. 
+Multiple human interfaces, one agent friendly mathematical core. 
 
 ## High Level Design
 
@@ -42,7 +42,7 @@ owns the DOM, the SVG gauges, the chart, the drag-to-scrub slider — everything
 about *presenting* the drivetrain math to a human via a web browser. 
 
 - `calc.py`
-(and `lapmap.py`) is the core mathematical logial model, it is plain-stdlib Python,
+(and `lapmap.py`) is the core mathematical logical model, it is plain-stdlib Python,
 dict in, dict out, no DOM and nothing Pyodide-specific anywhere in it. The
 browser happens to load it into Pyodide and call it on every keystroke, but
 nothing about the module *requires* a browser — anything else that can run

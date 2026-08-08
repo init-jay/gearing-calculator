@@ -3,6 +3,15 @@
 A modern vehicle gearing analyzer, inspired by
 [blocklayer.com/rpm-gear](https://www.blocklayer.com/rpm-gear).
 
+Have a play on **[gears.kranky.dev](https://gears.kranky.dev/)** (a hosted copy of this repo, no setup required).
+
+![Gearing Calculator screenshot](docs/hero.png)
+
+
+Also available as a native iOS app: **[ThirdGear on Apple App Store](https://apps.apple.com/au/app/thirdgear/id6791802366)**. 
+
+## Features
+
 Relates engine RPM to road speed through the drivetrain — transmission gear
 ratio × final drive × transfer case, with tire diameter and torque-converter
 slip — and shows a tachometer, speedometer, a chart of engine RPM against road

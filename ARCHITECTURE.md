@@ -56,6 +56,51 @@ nothing else. There is no JSON API and no backend endpoint to keep in sync
 with the frontend — the frontend *is* the backend, loaded as a WASM module. Nothing crosses the network after the initial page load. Reload the page
 offline (with the runtime vendored, see below) and it still computes. This app can be served as a static site just off of a CDN.
 
+## The math is a public, dependency-free module
+
+`calc.py` and `lapmap.py` are served as plain static files, byte-for-byte the
+same ones the browser fetches at boot (`GET /calc.py`, `GET /lapmap.py`).
+`compute()` (and the smaller entry points — `at_speed`, `tire_diameter`,
+`gears_at_speeds`, `accel_profile`, …) take a dict and return a dict, exactly
+what `app.js` sends across the Pyodide bridge — so there's no separate API
+contract to reverse-engineer from the UI:
+
+```bash
+curl -O https://gears.kranky.dev/calc.py
+python3 -c '
+import calc
+result = calc.compute({
+    "gears": [4.32, 2.46, 1.66, 1.23, 1.0, 0.85],
+    "final_drive": 3.64,
+    "tire": 634.3,
+    "max_rpm": 7000,
+    "weight": 1325,
+    "mu": 1.0,
+    "torque_curve": [[1000, 150], [4000, 300], [7000, 200]],
+})
+print(result["max_speed"], result["shifts"])
+'
+```
+
+An agent asked something like "what's the 0–100 km/h time for this gearset
+with a 3.9 final drive instead" doesn't need to drive a browser, fill in a
+form, and scrape the result back out of the DOM: it can fetch `calc.py` once
+and call `compute()` directly, the same way `tests/test_calc.py` does. The
+web page is one consumer of this module, not the only one.
+
+### Real example of Claude using the site's calculator
+
+Asked to compare a BMW E86 automatic against a manual gearbox swap, Claude
+fetched `https://gears.kranky.dev/calc.py`, ran it locally with both gear
+sets, and answered from the numbers it computed — no browser, no form-filling,
+no screen-scraping. This is the payoff of the agent-native interface above:
+the same file the site serves to itself is a complete, self-contained tool
+for anything that can run Python.
+
+![Claude fetching calc.py from gears.kranky.dev and running it directly to answer a gearing question](docs/claude.png)
+
+
+
 ## Boot sequence
 
 `main()` in `app.js` is the entire startup path. Four files are fetched in
@@ -278,37 +323,6 @@ that speed. It shares the Pyodide runtime and the bridge helpers
 (`callPy`/`callPyArgs`) but nothing else — it could be deleted without
 touching `calc.py`.
 
-## The math is a public, dependency-free module
-
-`calc.py` and `lapmap.py` are served as plain static files, byte-for-byte the
-same ones the browser fetches at boot (`GET /calc.py`, `GET /lapmap.py`).
-`compute()` (and the smaller entry points — `at_speed`, `tire_diameter`,
-`gears_at_speeds`, `accel_profile`, …) take a dict and return a dict, exactly
-what `app.js` sends across the Pyodide bridge — so there's no separate API
-contract to reverse-engineer from the UI:
-
-```bash
-curl -O https://gears.kranky.dev/calc.py
-python3 -c '
-import calc
-result = calc.compute({
-    "gears": [4.32, 2.46, 1.66, 1.23, 1.0, 0.85],
-    "final_drive": 3.64,
-    "tire": 634.3,
-    "max_rpm": 7000,
-    "weight": 1325,
-    "mu": 1.0,
-    "torque_curve": [[1000, 150], [4000, 300], [7000, 200]],
-})
-print(result["max_speed"], result["shifts"])
-'
-```
-
-An agent asked something like "what's the 0–100 km/h time for this gearset
-with a 3.9 final drive instead" doesn't need to drive a browser, fill in a
-form, and scrape the result back out of the DOM: it can fetch `calc.py` once
-and call `compute()` directly, the same way `tests/test_calc.py` does. The
-web page is one consumer of this module, not the only one.
 
 ## Running it locally
 

@@ -1,17 +1,6 @@
 # Gearing Calculator
 
-A modern vehicle gearing analyzer, inspired by
-[blocklayer.com/rpm-gear](https://www.blocklayer.com/rpm-gear).
-
-Have a play on **[gears.kranky.dev](https://gears.kranky.dev/)** (a served copy of this repo, no setup required).
-
-![Gearing Calculator screenshot](docs/hero.png)
-
-Also available as a native iOS app: **[ThirdGear on Apple App Store](https://apps.apple.com/au/app/thirdgear/id6791802366)**.
-
-## Why this is interesting
-
-This little website is designed to be easy for both humans and machines (AI Agents) to use.
+A modern vehicle gearing calculator, designed to be easy for both humans and machines (AI Agents) to use.
 
 
 ```mermaid
@@ -30,6 +19,23 @@ flowchart TD
 See
 [ARCHITECTURE.md](ARCHITECTURE.md) for more details on the design and how that's wired up, the physics
 behind the model, and how to run the app locally.
+
+## Humans
+
+Have a play on **[gears.kranky.dev](https://gears.kranky.dev/)** (a served copy of this repo, no setup required).
+
+![Gearing Calculator screenshot](docs/hero.png)
+
+Also available as a native iOS app: **[ThirdGear on Apple App Store](https://apps.apple.com/au/app/thirdgear/id6791802366)**.
+
+## Machines
+
+No API, no scraping needed: [`calc.py`](app/static/calc.py) is a
+dependency-free Python module served straight from the site, the same file
+the browser fetches and runs. Fetch it, `import` it, call `compute()` with a
+plain dict, get a plain dict back. See
+[The math is a public, dependency-free module](ARCHITECTURE.md#the-math-is-a-public-dependency-free-module)
+in ARCHITECTURE.md for how that works, and a real example of Claude using it.
 
 ## Mathematical Features
 
@@ -61,3 +67,7 @@ Other things it does:
 - **Light, dark, or auto theme.**
 - Works **fully offline** — the gearing math runs in the browser itself, not
   on a server, so once the page has loaded once it needs no network.
+
+
+Calculator functionalities are inspired by
+[blocklayer.com/rpm-gear](https://www.blocklayer.com/rpm-gear).
